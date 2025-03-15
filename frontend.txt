@@ -1,0 +1,167 @@
+注意1：------------------这是前端发送短信请求的代码
+try {
+            // 开始加载状态
+            setIsLoading(true);
+
+            // 使用smsService发送验证码
+            const response = await smsService.sendVerificationCode(formData.phone);
+
+            // 检查响应状态和消息
+            console.log("验证码请求响应:", response.data);
+
+            // 成功情况 - 响应码200
+            if (response.data.code === 200) {
+                // 显示成功信息
+                console.log(response.data.message || "验证码发送成功");
+
+                // 开始倒计时
+                setCountdown(60);
+                const timer = setInterval(() => {
+                    setCountdown((prevCount) => {
+                        if (prevCount <= 1) {
+                            clearInterval(timer);
+                            return 0;
+                        }
+                        return prevCount - 1;
+                    });
+                }, 1000);
+            } else {
+                // 处理非200但也不是错误的情况
+                setErrors({
+                    ...errors,
+                    phone: response.data.message || "验证码发送可能失败，请稍后再试"
+                });
+            }
+        } catch (error) {
+            // 请求失败
+            console.error("发送验证码失败:", error);
+
+            if (error.response) {
+                // 服务器返回了错误响应
+                const responseData = error.response.data;
+
+                // 显示后端返回的错误信息
+                if (responseData && responseData.message) {
+                    setErrors({...errors, phone: responseData.message});
+                } else if (error.response.status === 500) {
+                    setErrors({...errors, phone: "验证码发送失败，请稍后再试"});
+                } else {
+                    setErrors({...errors, phone: `请求失败 (${error.response.status})`});
+                }
+            } else if (error.request) {
+                // 请求发送了但没有收到响应
+                setErrors({...errors, phone: "网络错误，请检查您的网络连接"});
+            } else {
+                // 请求设置时发生错误
+                setErrors({...errors, phone: "发送请求出错"});
+            }
+        } finally {
+            // 结束加载状态
+            setIsLoading(false);
+        }
+
+注意2：---------------------这是前端API接口代码
+import axios from 'axios';
+
+// 创建Axios实例
+const api = axios.create({
+    // 根据实际部署环境设置baseURL
+    baseURL: import.meta.env.MODE === 'production'
+        ? 'https://yourdomain.com/api' // 生产环境API地址
+        : 'http://127.0.0.1:8412/api',  // 开发环境API地址
+
+    // 请求超时时间
+    timeout: 10000,
+
+    // 请求头
+    headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+});
+
+// 请求拦截器
+api.interceptors.request.use(
+    (config) => {
+        // 在发送请求前做些什么
+        // 例如：添加认证token
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => {
+        // 对请求错误做些什么
+        return Promise.reject(error);
+    }
+);
+
+// 响应拦截器
+api.interceptors.response.use(
+    (response) => {
+        // 对响应数据做点什么
+        return response;
+    },
+    (error) => {
+        // 对响应错误做点什么
+        // 例如：统一处理特定错误码
+        if (error.response) {
+            // 服务器返回了错误码
+            if (error.response.status === 401) {
+                // 未授权，可能是token过期
+                localStorage.removeItem('token');
+                // 可以在这里添加重定向到登录页面的逻辑
+            }
+
+            if (error.response.status === 403) {
+                // 禁止访问
+                console.error('没有权限访问此资源');
+            }
+
+            if (error.response.status === 500) {
+                // 服务器错误
+                console.error('服务器错误，请稍后再试');
+            }
+        } else if (error.request) {
+            // 请求发出，但没有收到响应
+            console.error('网络错误，无法连接到服务器');
+        } else {
+            // 请求设置出错
+            console.error('请求设置出错:', error.message);
+        }
+
+        return Promise.reject(error);
+    }
+);
+
+export default api;
+
+注意3：-----------------------短信服务相关API
+import api from './api';
+
+/**
+ * 短信服务相关API
+ */
+export const smsService = {
+    /**
+     * 发送短信验证码
+     * @param {string} phone - 手机号
+     * @returns {Promise} - API响应
+     */
+    sendVerificationCode: (phone) => {
+        return api.post('/sms/send-verification-code/', { phone });
+    },
+
+    /**
+     * 验证短信验证码
+     * @param {string} phone - 手机号
+     * @param {string} code - 验证码
+     * @returns {Promise} - API响应
+     */
+    verifyCode: (phone, code) => {
+        return api.post('/sms/verify-code/', { phone, code });
+    }
+};
+
+export default smsService;

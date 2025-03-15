@@ -1,0 +1,6 @@
+---
+description: 针对后端django项目的规则
+globs: 
+alwaysApply: false
+---
+[backend.md](mdc:.cursor/backend.md)
