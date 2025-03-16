@@ -40,9 +40,12 @@ INSTALLED_APPS = [
     'dream.apps.DreamConfig',
     'rest_framework',  # 添加DRF
     'rest_framework_simplejwt',  # 添加SimpleJWT
+    'rest_framework_simplejwt.token_blacklist',  # 添加JWT黑名单功能
     'coreapi',  # 添加coreapi用于API文档
-    'corsheaders',
+    'corsheaders',  # 跨域支持
 ]
+
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # 必须放在其他中间件前面
@@ -224,7 +227,26 @@ from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    # 其他配置...
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,  # 刷新token后，之前的token不再可用
+    'UPDATE_LAST_LOGIN': True,
+    
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUDIENCE': None,
+    'ISSUER': None,
+    
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
+    
+    'JTI_CLAIM': 'jti',
 }
 """
 - 只想返回JSON：删除 BrowsableAPIRenderer

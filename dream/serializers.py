@@ -162,3 +162,55 @@ class UserRegistrationWithCodeSerializer(serializers.ModelSerializer):
             password=validated_data['password']
         )
         return user
+
+
+class PhoneVerifyCodeLoginSerializer(serializers.Serializer):
+    """
+    手机号验证码登录序列化器
+    """
+    phone_number = serializers.CharField(
+        max_length=11,
+        validators=[
+            RegexValidator(
+                regex=r'^1[3-9]\d{9}$',
+                message='请输入有效的中国大陆手机号'
+            )
+        ],
+        error_messages={
+            'required': '请提供手机号',
+            'blank': '手机号不能为空',
+            'max_length': '手机号最多为11个字符',
+        }
+    )
+    
+    code = serializers.CharField(
+        max_length=6,
+        min_length=6,
+        error_messages={
+            'required': '请提供验证码',
+            'blank': '验证码不能为空',
+            'max_length': '验证码最多为6个字符',
+            'min_length': '验证码最少为6个字符',
+        }
+    )
+    
+    def validate(self, data):
+        phone_number = data.get('phone_number')
+        code = data.get('code')
+        
+        if not phone_number or not code:
+            raise serializers.ValidationError('请提供手机号和验证码')
+        
+        # 验证码验证放在视图中处理
+        
+        # 尝试查找用户
+        try:
+            user = User.objects.get(phone_number=phone_number)
+        except User.DoesNotExist:
+            raise serializers.ValidationError('该手机号未注册')
+        
+        if not user.is_active:
+            raise serializers.ValidationError('该用户已被禁用')
+        
+        data['user'] = user
+        return data
