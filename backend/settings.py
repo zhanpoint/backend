@@ -90,6 +90,9 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
+# 允许暴露的响应头
+CORS_EXPOSE_HEADERS = ['Content-Length', 'Content-Type']
+
 ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [
@@ -238,7 +241,7 @@ SIMPLE_JWT = {
     'ISSUER': None,
     
     'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',  # 这是Django中HTTP头的特殊格式
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
     
@@ -253,3 +256,50 @@ SIMPLE_JWT = {
 - 需要更严格的访问控制：改用 IsAuthenticated
 - 想添加token认证：加入 TokenAuthentication
 """
+
+# 日志配置
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/debug.log',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'django.request': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'dream': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
+

@@ -11,6 +11,7 @@ from .views.user import (
     UserLogoutAPIView,  # 用户登出API
     UserProfileAPIView,  # 用户资料API
 )
+from .views.oss import upload_image
 
 # 设置API URL前缀
 api_urlpatterns = [
@@ -28,6 +29,9 @@ api_urlpatterns = [
     
     # 短信验证码API
     path('sms/send-verification-code/', SendVerificationCodeAPIView.as_view(), name='send-code'),
+
+    # OSS对象存储API
+    path('upload/', upload_image, name='upload-image'),
 ]
 
 # 总路由
