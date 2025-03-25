@@ -1,5 +1,4 @@
 from django.db.models.signals import post_save
-from django.dispatch import receiver
 from django.apps import apps
 from .utils.oss import OSS
 import logging

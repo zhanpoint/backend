@@ -7,3 +7,4 @@ from .user import (
     UserLogoutAPIView,
     UserProfileAPIView
 )
+from .dream import DreamViewSet

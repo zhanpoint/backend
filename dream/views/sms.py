@@ -5,7 +5,7 @@ import json
 import logging
 
 from backend import local_settings
-from dream.serializers import PhoneSerializer
+from dream.serializers.user_serializers import PhoneSerializer
 from dream.utils.sms import SMSService
 
 # 获取日志记录器

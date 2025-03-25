@@ -149,14 +149,14 @@ class OSS:
             bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
             
             # 生成文件路径
-            file_ext = file_obj.name.split('.')[-1]
+            file_ext = file_obj.name.split('.')[-1]  # 文件类型后缀
             file_path = f'dreams/{time.strftime("%Y%m%d")}/{uuid.uuid4().hex}.{file_ext}'
             
             # 上传文件
             result = bucket.put_object(file_path, file_obj)
             
             if result.status == 200:
-                return f'https://{self.bucket_name}.{self.endpoint}/{file_path}'
+                return f'https://{self.bucket_name}.{self.endpoint.replace("https://", "")}/{file_path}'
             else:
                 raise Exception("文件上传失败")
                 
@@ -175,4 +175,50 @@ class OSS:
             return oss.ensure_bucket_exists()
         except Exception as e:
             logger.error(f"为用户{username}创建bucket失败: {str(e)}")
-            return False 
+            return False
+
+
+
+    def delete_file(self, file_key):
+        """
+        删除OSS中的文件
+        :param file_key: 文件名
+        :return: bool 删除是否成功
+        """
+        try:
+            # 获取bucket实例
+            bucket = self.get_bucket()
+            
+            # 删除文件
+            bucket.delete_object(file_key)
+            
+            return True
+        except Exception as e:
+            logger.error(f"删除OSS文件失败: {str(e)}")
+            return False
+
+    def get_bucket(self):
+        """
+        获取OSS bucket实例
+        使用STS临时凭证创建bucket实例，确保安全性
+        :return: oss2.Bucket实例
+        """
+        try:
+            # 获取STS临时凭证
+            sts_token = self._get_sts_token()
+            
+            # 使用STS凭证创建认证对象
+            auth = oss2.StsAuth(
+                sts_token['access_key_id'],
+                sts_token['access_key_secret'],
+                sts_token['security_token']
+            )
+            
+            # 创建并返回bucket实例
+            bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
+            logger.debug(f"成功创建Bucket实例: {self.bucket_name}")
+            return bucket
+            
+        except Exception as e:
+            logger.error(f"获取Bucket实例失败: {str(e)}")
+            raise 

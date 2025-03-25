@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.core.validators import RegexValidator
 from django.contrib.auth import authenticate
-from .models import User
+from dream.models import User
 
 
 class PhoneSerializer(serializers.Serializer):
@@ -182,7 +182,7 @@ class PhoneVerifyCodeLoginSerializer(serializers.Serializer):
             'max_length': '手机号最多为11个字符',
         }
     )
-    
+
     code = serializers.CharField(
         max_length=6,
         min_length=6,
@@ -193,24 +193,24 @@ class PhoneVerifyCodeLoginSerializer(serializers.Serializer):
             'min_length': '验证码最少为6个字符',
         }
     )
-    
+
     def validate(self, data):
         phone_number = data.get('phone_number')
         code = data.get('code')
-        
+
         if not phone_number or not code:
             raise serializers.ValidationError('请提供手机号和验证码')
-        
+
         # 验证码验证放在视图中处理
-        
+
         # 尝试查找用户
         try:
             user = User.objects.get(phone_number=phone_number)
         except User.DoesNotExist:
             raise serializers.ValidationError('该手机号未注册')
-        
+
         if not user.is_active:
             raise serializers.ValidationError('该用户已被禁用')
-        
+
         data['user'] = user
         return data

@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
 import logging
-from dream.serializers import (
+from dream.serializers.user_serializers import (
     UserSerializer,
     UserLoginSerializer,
     UserRegistrationWithCodeSerializer,

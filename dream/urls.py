@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+from rest_framework.routers import DefaultRouter
 from .views.sms import SendVerificationCodeAPIView
 from .views.user import (
     UserRegistrationWithCodeAPIView,  # 手机号验证码注册API
@@ -11,7 +12,12 @@ from .views.user import (
     UserLogoutAPIView,  # 用户登出API
     UserProfileAPIView,  # 用户资料API
 )
-from .views.oss import upload_image
+from .views import oss
+from .views.dream import DreamViewSet
+
+# 创建路由器并注册ViewSet
+router = DefaultRouter()
+router.register(r'dreams', DreamViewSet, basename='dream')
 
 # 设置API URL前缀
 api_urlpatterns = [
@@ -31,7 +37,11 @@ api_urlpatterns = [
     path('sms/send-verification-code/', SendVerificationCodeAPIView.as_view(), name='send-code'),
 
     # OSS对象存储API
-    path('upload/', upload_image, name='upload-image'),
+    path('image/upload/', oss.upload_image, name='upload-image'),
+    path('image/delete/', oss.delete_image, name='delete-image'),
+    
+    # 包含ViewSet路由
+    path('', include(router.urls)),
 ]
 
 # 总路由

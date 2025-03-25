@@ -54,8 +54,6 @@ def upload_image(request):
         else:
             logger.error("请求中没有包含有效的Bearer令牌")
             return Response({'error': '缺少认证令牌'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        logger.info(f"认证用户: {request.user}")
         
         # 获取上传的文件
         file = request.FILES.get('file')
@@ -63,7 +61,7 @@ def upload_image(request):
             return Response({'error': '请选择要上传的图片'}, status=status.HTTP_400_BAD_REQUEST)
         
         # 验证文件大小
-        if file.size > 2 * 1024 * 1024:  # 2MB
+        if file.size > 4 * 1024 * 1024:  # 4MB
             return Response({'error': '图片大小不能超过2MB'}, status=status.HTTP_400_BAD_REQUEST)
         
         # 验证文件类型
@@ -84,7 +82,7 @@ def upload_image(request):
             return Response({'error': '创建存储空间失败'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         # 上传文件
-        file_url = oss.upload_file(file)
+        file_url = oss.upload_file(file)  # 以第一个'.'分割，取第二部分
         logger.info(f"文件上传成功: {file_url}")
         
         return Response({
@@ -97,6 +95,40 @@ def upload_image(request):
         logger.error(traceback.format_exc())
         return Response({
             'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['DELETE'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def delete_image(request):
+    """
+    删除OSS中的图片文件
+    """
+    try:
+        file_key = request.data.get('fileKey')
+        if not file_key:
+            return Response({
+                'error': '文件名不能为空'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 获取OSS实例
+        oss = OSS(request.user.username)
+        # 删除文件
+        result = oss.delete_file(file_key)
+
+        if result:
+            return Response({
+                'message': '文件删除成功'
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': '文件删除失败'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"删除文件失败: {str(e)}")
+        return Response({
+            'error': f'删除文件失败: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

@@ -170,7 +170,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -213,7 +213,6 @@ REST_FRAMEWORK = {
     ],
     # 认证方式
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',  # 方式一：使用Django的session机制进行用户认证
         'rest_framework_simplejwt.authentication.JWTAuthentication',  # 方式二：DRF的官方JWT认证
     ],
     # 权限设置
@@ -230,9 +229,9 @@ from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': False,
+    'ROTATE_REFRESH_TOKENS': True,  # 是否允许刷新token
     'BLACKLIST_AFTER_ROTATION': True,  # 刷新token后，之前的token不再可用
-    'UPDATE_LAST_LOGIN': True,
+    'UPDATE_LAST_LOGIN': True,  # 更新最后登录时间
     
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
@@ -256,50 +255,4 @@ SIMPLE_JWT = {
 - 需要更严格的访问控制：改用 IsAuthenticated
 - 想添加token认证：加入 TokenAuthentication
 """
-
-# 日志配置
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {module} {message}',
-            'style': '{',
-        },
-        'simple': {
-            'format': '{levelname} {message}',
-            'style': '{',
-        },
-    },
-    'handlers': {
-        'console': {
-            'level': 'DEBUG',
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-        'file': {
-            'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': 'logs/debug.log',
-            'formatter': 'verbose',
-        },
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
-            'propagate': True,
-        },
-        'django.request': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'dream': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-    },
-}
 

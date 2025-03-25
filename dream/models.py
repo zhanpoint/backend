@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import RegexValidator, MinLengthValidator, MaxLengthValidator
 from django.core.exceptions import ValidationError
 
+
 class User(AbstractUser):
     """自定义用户模型"""
     phone_number = models.CharField(
@@ -11,13 +12,14 @@ class User(AbstractUser):
         validators=[RegexValidator(r'^1[3-9]\d{9}$', '请输入正确的手机号')],
         verbose_name='手机号'
     )
-    
+
     class Meta:
         verbose_name = '用户'
         verbose_name_plural = verbose_name
-        
+
     def __str__(self):
         return self.username or self.phone_number
+
 
 class DreamCategory(models.Model):
     """梦境分类模型"""
@@ -31,7 +33,7 @@ class DreamCategory(models.Model):
         ('repeating', '重复梦'),
         ('sleep_paralysis', '睡眠瘫痪')
     ]
-    
+
     name = models.CharField(
         max_length=50,
         unique=True,
@@ -46,6 +48,7 @@ class DreamCategory(models.Model):
 
     def __str__(self):
         return self.get_name_display()
+
 
 class Tag(models.Model):
     """标签基类模型"""
@@ -62,32 +65,61 @@ class Tag(models.Model):
         ],
         verbose_name="标签类型"
     )
-    created_by = models.ForeignKey('User', on_delete=models.CASCADE, verbose_name="创建者")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
     class Meta:
-        unique_together = ('name', 'tag_type', 'created_by')
+        unique_together = ('name', 'tag_type')
         verbose_name = "标签"
         verbose_name_plural = verbose_name
 
     def clean(self):
         if self.name:
             self.name = self.name.strip()
-        
+
         if not self.name:
             raise ValidationError('标签名称不能为空')
-    
+
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
-    
+
     def __str__(self):
         return f"{self.get_tag_type_display()}:{self.name}"
+
 
 def validate_image_size(value):
     if value.size > 2 * 1024 * 1024:  # 2MB
         raise ValidationError('图片大小不能超过2MB')
 
+
+class DreamImage(models.Model):
+    """梦境图片模型"""
+    dream = models.ForeignKey(
+        'Dream',
+        on_delete=models.CASCADE,
+        related_name='images',
+        verbose_name="所属梦境"
+    )
+    image_url = models.URLField(
+        max_length=255,
+        verbose_name="图片URL"
+    )
+    position = models.PositiveIntegerField(
+        default=0,
+        verbose_name="图片在梦境内容的位置"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="创建时间"
+    )
+
+    class Meta:
+        verbose_name = "梦境图片"
+        verbose_name_plural = verbose_name
+        ordering = ['position']
+
+    def __str__(self):
+        return f"{self.dream.title}的图片{self.id}"
 
 
 class Dream(models.Model):
@@ -107,7 +139,8 @@ class Dream(models.Model):
     user = models.ForeignKey('User', on_delete=models.CASCADE, verbose_name="用户")
     categories = models.ManyToManyField(
         DreamCategory,
-        verbose_name="梦境分类"
+        verbose_name="梦境分类",
+
     )
     theme_tags = models.ManyToManyField(
         Tag,
@@ -126,7 +159,7 @@ class Dream(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
-    
+
     class Meta:
         verbose_name = "梦境"
         verbose_name_plural = verbose_name
@@ -136,22 +169,27 @@ class Dream(models.Model):
         # 验证标题
         if self.title:
             self.title = self.title.strip()
-        
-        # 验证分类数量（在保存后进行）
-        if hasattr(self, 'categories'):
-            categories_count = self.categories.count()
-            if categories_count < 1 or categories_count > 3:
-                raise ValidationError('梦境分类数量必须在1-3个之间')
-        
-        # 验证图片数量和总大小
-        if hasattr(self, 'images'):
-            images = self.images.all()
-            if images.count() > 3:
-                raise ValidationError('最多只能上传3张图片')
-            
-            total_size = sum(img.image.size for img in images)
-            if total_size > 10 * 1024 * 1024:  # 10MB
-                raise ValidationError('所有图片总大小不能超过10MB')
+
+        # 只有在已保存的对象上才验证关系
+        if self.id:
+            # 验证分类数量（在保存后进行）
+            if hasattr(self, 'categories'):
+                categories_count = self.categories.count()
+                if categories_count < 1 or categories_count > 3:
+                    raise ValidationError('梦境分类数量必须在1-3个之间')
+
+            # 验证图片数量和总大小
+            if hasattr(self, 'images'):
+                images = self.images.all()
+                if images.count() > 3:
+                    raise ValidationError('最多只能上传3张图片')
+
+                try:
+                    total_size = sum(img.image.size for img in images if hasattr(img, 'image') and img.image)
+                    if total_size > 10 * 1024 * 1024:  # 10MB
+                        raise ValidationError('所有图片总大小不能超过10MB')
+                except:
+                    pass
 
     def save(self, *args, **kwargs):
         self.clean()
