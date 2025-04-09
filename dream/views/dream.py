@@ -136,7 +136,6 @@ class DreamViewSet(viewsets.ModelViewSet):
             tags_data = form_data.get('tags', {})
             for tag_type in ['theme', 'character', 'location']:
                 # 获取当前梦境的所有标签记录
-                # 返回的是 Django 的 ManyRelatedManager 对象,这是一个关系管理器，用于处理多对多关系,可以对其调用 add,remove,clear
                 current = list(getattr(instance, f'{tag_type}_tags').all())
                 # 删除dream——tag中间表记录
                 getattr(instance, f'{tag_type}_tags').clear()
@@ -146,45 +145,104 @@ class DreamViewSet(viewsets.ModelViewSet):
                 self._cleanup_unused_tags(current, tag_type)
 
             # 处理图片操作
-            image_new_urls = [obj['url'] for obj in form_data.get('remoteImages', [])]
-            image_old_urls = list(DreamImage.objects.filter(dream=instance).values_list('image_url', flat=True))
-            delete_image_urls = list(set(image_old_urls) - set(image_new_urls))
-            # 删除当前梦境的不使用的图片
-            if delete_image_urls:
-                self._process_image_delete(instance, delete_image_urls, request)
-            if request.FILES:
-                self._process_image_uploads(instance, request)
+            # 1. 检查需要删除的图片
+            self._process_image_changes(instance, form_data, request)
 
             # 序列化并返回完整的梦境数据
             instance.content = self._insert_images_to_content(instance)
             serializer = DreamSerializer(instance)
-            return Response(serializer.data)
+            
+            # 获取序列化数据并添加额外信息
+            response_data = serializer.data
+            
+            # 检查是否有新图片上传
+            has_new_images = request.FILES and any(key.startswith('imageFile_') for key in request.FILES.keys())
+            
+            # 如果有新图片，添加WebSocket连接信息
+            if has_new_images:
+                response_data['images_status'] = {
+                    'status': 'processing',
+                    'websocket_url': f'/ws/dream-images/{instance.id}/',
+                    'message': '正在处理新上传的图片，稍后将自动更新',
+                    'images': []  # 预留空图片列表，将通过WebSocket更新
+                }
+            
+            return Response(response_data)
 
         except Exception as e:
             logger.error(f"更新梦境记录失败: {str(e)}")
             return Response({"detail": f"更新梦境记录失败: {str(e)}"},
                             status=status.HTTP_400_BAD_REQUEST)
 
-    def _process_image_delete(self, dream, delete_image_urls, request):
-        oss = OSS(username=request.user.username)
-        oss.ensure_bucket_exists()
-
-        image_list = DreamImage.objects.filter(dream=dream)
-        # 处理删除图片
-        for url in delete_image_urls:
-            try:
-                image = image_list.filter(image_url=url).first()
-                # 从OSS中删除文件
-                file_name = '/'.join(url.split('/')[-3:])
-                try:
-                    oss.delete_file(file_name)
-                except Exception as e:
-                    logger.warning(f"从OSS删除图片失败: {str(e)}")
-
-                # 删除数据库记录
-                image.delete()
-            except Exception as e:
-                logger.error(f"删除图片失败: {str(e)}")
+    def _process_image_changes(self, dream, form_data, request):
+        """
+        处理梦境图片变更，包括删除不再使用的图片和添加新图片
+        - 对比现有图片和表单中的图片
+        - 异步删除不再使用的图片
+        - 异步处理新上传的图片
+        
+        Args:
+            dream: 梦境实例
+            form_data: 处理过的表单数据
+            request: 请求对象
+        """
+        try:
+            # 1. 查找需要删除的图片
+            image_new_urls = [obj['url'] for obj in form_data.get('remoteImages', [])]
+            image_old_urls = list(DreamImage.objects.filter(dream=dream).values_list('image_url', flat=True))
+            
+            # 计算需要删除的图片URL
+            delete_image_urls = list(set(image_old_urls) - set(image_new_urls))
+            
+            # 2. 异步删除不再使用的图片
+            if delete_image_urls:
+                self._async_delete_images(dream.id, delete_image_urls, request.user.username)
+                
+            # 3. 异步处理新上传的图片
+            if request.FILES:
+                self._process_image_uploads(dream, request)
+                
+        except Exception as e:
+            logger.error(f"处理图片变更失败: {str(e)}")
+            raise ValidationError(f"处理图片变更失败: {str(e)}")
+    
+    def _async_delete_images(self, dream_id, delete_image_urls, username):
+        """
+        异步删除图片
+        - 获取图片详细信息
+        - 发送到Celery任务队列进行异步删除
+        
+        Args:
+            dream_id: 梦境ID
+            delete_image_urls: 需要删除的图片URL列表
+            username: 用户名，用于OSS操作
+        """
+        try:
+            # 获取图片详细信息
+            image_details = []
+            for url in delete_image_urls:
+                # 查找图片记录
+                image = DreamImage.objects.filter(image_url=url).first()
+                if image:
+                    image_details.append({
+                        'id': image.id,
+                        'url': url
+                    })
+                    # 立即删除数据库记录（图片实体由Celery异步删除）
+                    image.delete()
+                else:
+                    logger.warning(f"找不到图片记录: {url}")
+            
+            # 如果有图片需要删除，发送到Celery任务队列
+            if image_details:
+                from dream.utils.queue_manager import send_image_delete_task
+                send_image_delete_task(dream_id, image_details, username)
+                logger.info(f"已将{len(image_details)}个图片发送到删除队列")
+                
+        except Exception as e:
+            logger.error(f"发起异步删除图片失败: {str(e)}")
+            # 不抛出异常，避免影响整个更新流程
+            # 这里图片删除失败不应该导致整个梦境更新失败
 
     def _extract_form_data(self, request):
         """从请求中提取表单数据"""
@@ -304,3 +362,43 @@ class DreamViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"图片上传失败: {str(e)}")
             raise ValidationError(f"图片上传失败: {str(e)}")
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        删除梦境记录，同时异步删除关联的OSS图片
+        """
+        try:
+            # 获取梦境记录
+            instance = self.get_object()
+            
+            # 获取梦境ID和用户名
+            dream_id = instance.id
+            username = request.user.username
+            
+            # 获取所有关联的图片URL
+            dream_images = DreamImage.objects.filter(dream=instance)
+            image_urls = []
+            
+            for image in dream_images:
+                image_urls.append({
+                    'id': image.id,
+                    'url': image.image_url
+                })
+            
+            # 先删除梦境记录
+            response = super().destroy(request, *args, **kwargs)
+            
+            # 如果有图片需要删除，则异步删除
+            if image_urls:
+                from dream.utils.queue_manager import send_image_delete_task
+                send_image_delete_task(dream_id, image_urls, username)
+                logger.info(f"已将{len(image_urls)}个图片发送到删除队列")
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"删除梦境记录失败: {str(e)}")
+            return Response(
+                {"error": f"删除梦境记录失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

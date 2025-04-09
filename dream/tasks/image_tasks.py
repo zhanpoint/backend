@@ -118,8 +118,8 @@ def process_and_upload_images(self, dream_id: int, encoded_files: List[Dict], po
                 time.sleep(RETRY_DELAY_FOR_DREAM_FETCH)
                 continue
                 
-            # 获取Dream实例
-            dream = Dream.objects.get(id=dream_id)
+        # 获取Dream实例
+        dream = Dream.objects.get(id=dream_id)
             # 成功获取，跳出循环
             logger.info(f"成功获取梦境记录: ID={dream_id}, 用户={dream.user.username}")
             break
@@ -218,5 +218,103 @@ def process_and_upload_images(self, dream_id: int, encoded_files: List[Dict], po
         logger.error(f"批量处理图片失败: {str(e)}")
         # 发送处理失败通知
         send_image_update(dream_id, [], status='failed', message=str(e))
+        # 如果失败，重试任务
+        raise self.retry(exc=e, countdown=60)
+
+@celery_app.task(bind=True, max_retries=5, retry_backoff=True, retry_backoff_max=600, time_limit=300)
+def delete_dream_images(self, dream_id: int, image_urls: List[Dict], username: str) -> List[bool]:
+    """
+    删除梦境相关的所有图片的Celery任务
+    
+    Args:
+        dream_id: 梦境记录ID
+        image_urls: 图片URL列表 [{"id": 1, "url": "https://..."}]
+        username: 用户名，用于获取OSS实例
+    
+    Returns:
+        List[bool]: 每个图片的删除结果
+    """
+    if not image_urls:
+        logger.info(f"没有图片需要删除: dream_id={dream_id}")
+        send_image_update(dream_id, [], status='delete_completed', message='没有图片需要删除')
+        return []
+    
+    logger.info(f"开始删除梦境(ID={dream_id})的图片, 总数: {len(image_urls)}")
+    
+    # 发送删除开始通知
+    send_image_update(dream_id, image_urls, status='delete_processing', 
+                     message=f'开始删除{len(image_urls)}张图片')
+    
+    try:
+        # 创建OSS实例
+        oss = OSS(username=username)
+        
+        # 提取文件路径
+        results = []
+        success_count = 0
+        
+        # 从URL中提取文件路径
+        for image in image_urls:
+            try:
+                url = image['url']
+                # 从URL中提取文件路径，例如 https://bucket.endpoint/dreams/date/uuid.jpg
+                # 提取 dreams/date/uuid.jpg 部分作为file_key
+                file_key = url.split('/', 3)[-1] if '/' in url else url
+                
+                # 使用线程池删除文件
+                result = oss.delete_file(file_key)
+                results.append({
+                    'id': image.get('id'),
+                    'url': url,
+                    'deleted': result
+                })
+                
+                if result:
+                    success_count += 1
+                    logger.info(f"成功删除图片: {file_key}")
+                else:
+                    logger.warning(f"删除图片失败: {file_key}")
+                
+                # 每删除一定数量的图片就更新一次进度
+                if len(results) % 5 == 0 or len(results) == len(image_urls):
+                    progress = int((len(results) / len(image_urls)) * 100)
+                    send_image_update(
+                        dream_id, 
+                        results, 
+                        status='delete_processing',
+                        progress=progress, 
+                        message=f'已删除 {len(results)}/{len(image_urls)} 张图片'
+                    )
+            except Exception as e:
+                logger.error(f"删除图片时出错: {str(e)}, 图片URL: {image.get('url')}")
+                results.append({
+                    'id': image.get('id'),
+                    'url': image.get('url'),
+                    'deleted': False,
+                    'error': str(e)
+                })
+        
+        # 发送完成通知
+        if success_count == len(image_urls):
+            send_image_update(
+                dream_id, 
+                results, 
+                status='delete_completed',
+                message=f'已成功删除全部 {len(image_urls)} 张图片'
+            )
+        else:
+            send_image_update(
+                dream_id, 
+                results, 
+                status='delete_completed',
+                message=f'已删除 {success_count}/{len(image_urls)} 张图片，部分删除失败'
+            )
+        
+        return results
+    
+    except Exception as e:
+        logger.error(f"批量删除图片失败: {str(e)}")
+        # 发送处理失败通知
+        send_image_update(dream_id, [], status='delete_failed', message=str(e))
         # 如果失败，重试任务
         raise self.retry(exc=e, countdown=60) 

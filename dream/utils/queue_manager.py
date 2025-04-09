@@ -32,4 +32,29 @@ def send_image_processing_task(dream_id: int, image_files: List[Dict], positions
         
     except Exception as e:
         logger.error(f"发送图片处理任务失败: {str(e)}")
+        raise
+
+def send_image_delete_task(dream_id: int, image_urls: List[Dict], username: str):
+    """
+    发送图片删除任务到Celery队列
+    
+    Args:
+        dream_id: 梦境记录ID
+        image_urls: 图片URL列表 [{"id": 1, "url": "https://..."}]
+        username: 用户名，用于获取OSS实例
+    
+    Returns:
+        str: Celery任务ID
+    """
+    try:
+        from dream.tasks.image_tasks import delete_dream_images
+        
+        # 通过Celery发送任务
+        result = delete_dream_images.delay(dream_id, image_urls, username)
+        
+        logger.info(f"已将图片删除任务发送到Celery队列: dream_id={dream_id}, images={len(image_urls)}, task_id={result.id}")
+        return result.id
+        
+    except Exception as e:
+        logger.error(f"发送图片删除任务失败: {str(e)}")
         raise 

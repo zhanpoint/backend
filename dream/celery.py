@@ -37,6 +37,11 @@ app.conf.task_routes = {
         'exchange': 'dream_images',
         'routing_key': 'image_processing',
     },
+    'dream.tasks.image_tasks.delete_dream_images': {
+        'queue': 'dream_image_processing',
+        'exchange': 'dream_images',
+        'routing_key': 'image_processing',
+    },
 }
 
 # 自动发现任务

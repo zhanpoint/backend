@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
 from channels.db import database_sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
-from .models import Dream, User
+from .models import Dream, User, DreamImage, DreamImageProcessing
 
 logger = logging.getLogger(__name__)
 
@@ -133,58 +133,228 @@ class DreamImagesConsumer(AsyncWebsocketConsumer):
         logger.info(f"WebSocket连接已关闭: dream_id={self.dream_id}, channel={self.channel_name}, "
                    f"code={close_code}, 连接持续时间={connection_duration:.1f}秒")
 
-    async def receive(self, text_data=None, bytes_data=None):
+    async def receive_json(self, content):
         """
-        接收客户端消息
+        接收并处理WebSocket消息
         """
-        if text_data:
+        try:
+            message_type = content.get('type')
+            logger.debug(f"收到消息类型: {message_type}")
+            
+            # 如果未认证，只接受认证消息
+            if not self.authenticated and message_type != 'authenticate':
+                logger.warning(f"未认证连接尝试发送非认证消息: {message_type}")
+                await self.send_json({
+                    'type': 'error',
+                    'message': '未授权，请先进行认证'
+                })
+                return
+            
+            # 处理不同类型的消息
+            if message_type == 'authenticate':
+                await self.authenticate(content)
+            elif message_type == 'ping':
+                await self.handle_ping(content)
+            elif message_type == 'request_status':
+                await self.handle_status_request(content)
+            else:
+                logger.warning(f"收到未知类型消息: {message_type}")
+                await self.send_json({
+                    'type': 'error',
+                    'message': f'未知消息类型: {message_type}'
+                })
+                
+        except Exception as e:
+            logger.error(f"处理JSON消息时出错: {str(e)}")
+            if self.authenticated:
+                await self.send_json({
+                    'type': 'error',
+                    'message': f'处理消息失败: {str(e)}'
+                })
+                
+    async def handle_status_request(self, content):
+        """
+        处理状态请求，返回梦境的最新图片处理状态
+        """
+        if not self.authenticated:
+            return
+            
+        try:
+            # 从数据库获取最新的梦境数据
+            dream = None
             try:
-                data = json.loads(text_data)
-                message_type = data.get('type')
+                dream = await database_sync_to_async(Dream.objects.get)(id=self.dream_id)
+            except Dream.DoesNotExist:
+                await self.send_json({
+                    'type': 'error',
+                    'message': f'梦境(ID={self.dream_id})不存在'
+                })
+                return
+                
+            # 获取梦境相关的图片
+            dream_images = await database_sync_to_async(list)(DreamImage.objects.filter(dream=dream))
+            
+            # 构建图片数据
+            images_data = []
+            for image in dream_images:
+                images_data.append({
+                    'id': image.id,
+                    'url': image.image_url,
+                    'position': image.position
+                })
+                
+            # 获取最近的图片处理状态
+            processing_status = await database_sync_to_async(DreamImageProcessing.objects.filter)(dream_id=self.dream_id).order_by('-created_at').first()
+            
+            # 构建状态响应
+            status_response = {
+                'type': 'image_update',
+                'dream_id': self.dream_id,
+                'images': images_data,
+                'status': 'completed'  # 默认状态
+            }
+            
+            # 如果有正在处理的状态，更新响应
+            if processing_status:
+                status_response['status'] = processing_status.status
+                status_response['progress'] = processing_status.progress
+                if processing_status.message:
+                    status_response['message'] = processing_status.message
+            
+            # 发送状态响应
+            await self.send_json(status_response)
+            logger.info(f"已发送梦境(ID={self.dream_id})的状态更新，包含{len(images_data)}张图片")
+            
+        except Exception as e:
+            logger.error(f"处理状态请求时出错: {str(e)}")
+            await self.send_json({
+                'type': 'error',
+                'message': f'获取状态失败: {str(e)}'
+            })
 
-                if message_type == 'ping':
-                    # 处理心跳请求
+    async def authenticate(self, content):
+        """
+        处理认证请求
+        """
+        token = content.get('token', '')
+        if not token:
+            logger.warning(f"收到空认证令牌: dream_id={self.dream_id}")
+            await self.send_json({
+                'type': 'error',
+                'message': '认证失败: 令牌为空'
+            })
+            await self.close(code=4001)
+            return False
+            
+        # 如果已经认证，则不需要再次认证
+        if self.authenticated:
+            logger.info(f"客户端重复认证请求: dream_id={self.dream_id}, 已认证")
+            await self.send_json({
+                'type': 'connection_established',
+                'dream_id': self.dream_id,
+                'message': '连接已建立，等待图片处理状态更新'
+            })
+            return True
+            
+        try:
+            # 验证令牌
+            from django.conf import settings
+            import jwt
+            
+            # 清理令牌前缀
+            if token.startswith('Bearer '):
+                token = token[7:]
+                
+            # 验证JWT令牌
+            try:
+                payload = jwt.decode(
+                    token, 
+                    settings.SIMPLE_JWT['SIGNING_KEY'],
+                    algorithms=[settings.SIMPLE_JWT['ALGORITHM']]
+                )
+                user_id = payload['user_id']
+                
+                # 验证用户是否存在
+                user = await database_sync_to_async(User.objects.filter)(id=user_id).first()
+                if not user:
+                    logger.warning(f"认证失败 - 用户不存在: user_id={user_id}")
                     await self.send_json({
-                        'type': 'pong',
-                        'timestamp': data.get('timestamp')
+                        'type': 'error',
+                        'message': '认证失败: 用户不存在'
                     })
-                elif message_type == 'authenticate':
-                    # 处理显式认证请求（兼容旧客户端）
-                    token = data.get('token', '')
-                    if not token:
-                        logger.warning(f"收到空认证令牌: dream_id={self.dream_id}")
-                        return
-
-                    # 如果已经认证，则不需要再次认证
-                    if self.authenticated:
-                        logger.info(f"客户端重复认证请求: dream_id={self.dream_id}, 已认证")
-                        await self.send_json({
-                            'type': 'connection_established',
-                            'dream_id': self.dream_id,
-                            'message': '连接已建立，等待图片处理状态更新'
-                        })
-                        return
-                        
-                    authenticated = await self.authenticate(token)
-                    if authenticated:
-                        self.authenticated = True
-                        await self.send_json({
-                            'type': 'connection_established',
-                            'dream_id': self.dream_id,
-                            'message': '连接已建立，等待图片处理状态更新'
-                        })
-                        
-                        # 启动服务器心跳任务
-                        if self.ping_task is None:
-                            self.ping_task = asyncio.create_task(self.server_ping())
-                    else:
-                        logger.warning(f"认证失败: dream_id={self.dream_id}")
-                        await self.close(code=4001)
-            except json.JSONDecodeError:
-                logger.error(f"接收到无效的JSON数据: {text_data}")
-            except Exception as e:
-                logger.error(f"处理接收到的消息时出错: {str(e)}")
-
+                    await self.close(code=4001)
+                    return False
+                    
+                # 检查梦境的所有者是否是当前用户
+                dream = await database_sync_to_async(Dream.objects.filter)(id=self.dream_id).first()
+                if not dream:
+                    logger.warning(f"认证失败 - 梦境不存在: dream_id={self.dream_id}")
+                    await self.send_json({
+                        'type': 'error',
+                        'message': '认证失败: 梦境不存在'
+                    })
+                    await self.close(code=4001)
+                    return False
+                    
+                # 验证成功
+                self.authenticated = True
+                self.user = user
+                
+                # 启动服务器心跳任务
+                if self.ping_task is None:
+                    self.ping_task = asyncio.create_task(self.server_ping())
+                    
+                await self.send_json({
+                    'type': 'connection_established',
+                    'dream_id': self.dream_id,
+                    'message': '连接已建立，等待图片处理状态更新'
+                })
+                
+                logger.info(f"认证成功: user_id={user_id}, dream_id={self.dream_id}")
+                return True
+                
+            except jwt.ExpiredSignatureError:
+                logger.warning(f"认证失败 - 令牌过期: dream_id={self.dream_id}")
+                await self.send_json({
+                    'type': 'error',
+                    'message': '认证失败: 令牌已过期'
+                })
+                await self.close(code=4001)
+                return False
+                
+            except jwt.InvalidTokenError:
+                logger.warning(f"认证失败 - 无效令牌: dream_id={self.dream_id}")
+                await self.send_json({
+                    'type': 'error',
+                    'message': '认证失败: 无效令牌'
+                })
+                await self.close(code=4001)
+                return False
+                
+        except Exception as e:
+            logger.error(f"认证过程中出错: {str(e)}")
+            await self.send_json({
+                'type': 'error',
+                'message': f'认证失败: {str(e)}'
+            })
+            await self.close(code=4001)
+            return False
+            
+    async def handle_ping(self, content):
+        """
+        处理客户端心跳
+        """
+        if not self.authenticated:
+            return
+            
+        try:
+            await self.send_json({
+                'type': 'pong',
+                'timestamp': content.get('timestamp', time.time())
+            })
+        except Exception as e:
+            logger.error(f"处理心跳请求时出错: {str(e)}")
+            
     async def server_ping(self):
         """
         服务器发送定期心跳以保持连接活跃
@@ -227,31 +397,6 @@ class DreamImagesConsumer(AsyncWebsocketConsumer):
             return True
         except Exception as e:
             logger.error(f"发送JSON消息失败: {str(e)}")
-            return False
-
-    @database_sync_to_async
-    def authenticate(self, token):
-        """
-        验证客户端提供的访问令牌
-        """
-        try:
-            if token.startswith('Bearer '):
-                token = token[7:]
-            
-            # 验证令牌
-            access_token = AccessToken(token)
-            user_id = access_token.get('user_id')
-            
-            # 检查用户是否拥有该梦境
-            user = User.objects.get(id=user_id)
-            dream = Dream.objects.get(id=self.dream_id)
-            
-            return dream.user_id == user.id
-        except (TokenError, ObjectDoesNotExist) as e:
-            logger.error(f"认证用户失败: {str(e)}")
-            return False
-        except Exception as e:
-            logger.error(f"认证过程中发生错误: {str(e)}")
             return False
 
     @database_sync_to_async
