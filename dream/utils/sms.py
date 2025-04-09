@@ -51,9 +51,12 @@ class SMSService:
         cache_key = f"sms_code:{phone}"
         try:
             # 使用Django的cache (Redis后端) 存储验证码
+            # 确保使用参数提供的expires值，而不是Django缓存的默认过期时间
+            # 注意：明确使用timeout参数，不受settings.py中CACHES的TIMEOUT设置影响
             cache.set(cache_key, code, timeout=expires)
-            # 验证存储是否成功
+            # 验证存储是否成功并检查过期时间是否正确设置
             stored_code = cache.get(cache_key)
+            logging.info(f"验证码已存储到Redis，手机号: {phone}，过期时间: {expires}秒")
             return stored_code == code
         except Exception as e:
             # 记录详细错误
@@ -61,22 +64,22 @@ class SMSService:
             # 如果Redis不可用，临时使用内存字典存储
             if not hasattr(SMSService, '_code_cache'):
                 SMSService._code_cache = {}
-            
+
             import threading
             import time
-            
+
             # 存储验证码到内存
             SMSService._code_cache[cache_key] = code
-            
+
             # 创建线程在指定时间后清除验证码
             def cleanup():
                 time.sleep(expires)
                 if cache_key in SMSService._code_cache:
                     del SMSService._code_cache[cache_key]
-            
+
             # 启动清理线程
             threading.Thread(target=cleanup, daemon=True).start()
-            
+
             return True
 
     def get_sts_token(self):
@@ -186,7 +189,7 @@ class SMSService:
         except Exception as e:
             # 记录详细错误信息
             logging.error(f"发送短信时出错: {str(e)}")
-            
+
             # 检查是否是凭证过期错误
             error_msg = str(e).lower()
             if ('expired' in error_msg or 'invalid' in error_msg) and retry_count > 0:
@@ -215,15 +218,15 @@ class SMSService:
         """
         # 构建缓存键
         cache_key = f"sms_code:{phone}"
-        
+
         try:
             # 尝试从Redis获取验证码
             stored_code = cache.get(cache_key)
-            
+
             # 如果Redis中没有，尝试从内存缓存获取
             if stored_code is None and hasattr(SMSService, '_code_cache'):
                 stored_code = SMSService._code_cache.get(cache_key)
-            
+
             # 验证码比较
             if stored_code is not None:
                 # 验证成功后删除验证码，防止重复使用
@@ -232,10 +235,10 @@ class SMSService:
                     if hasattr(SMSService, '_code_cache') and cache_key in SMSService._code_cache:
                         del SMSService._code_cache[cache_key]
                     return True
-            
+
             # 验证码不存在或不匹配
             return False
-            
+
         except Exception as e:
             logging.error(f"验证码验证过程中出错: {str(e)}")
             return False

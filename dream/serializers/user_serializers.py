@@ -214,3 +214,63 @@ class PhoneVerifyCodeLoginSerializer(serializers.Serializer):
 
         data['user'] = user
         return data
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """
+    密码重置序列化器
+    """
+    phone = serializers.CharField(
+        max_length=11,
+        validators=[
+            RegexValidator(
+                regex=r'^1[3-9]\d{9}$',
+                message='请输入有效的中国大陆手机号'
+            )
+        ],
+        error_messages={
+            'required': '请提供手机号',
+            'blank': '手机号不能为空',
+            'max_length': '手机号最多为11个字符',
+        }
+    )
+    
+    code = serializers.CharField(
+        max_length=6,
+        min_length=6,
+        error_messages={
+            'required': '请提供验证码',
+            'blank': '验证码不能为空',
+            'max_length': '验证码最多为6个字符',
+            'min_length': '验证码最少为6个字符',
+        }
+    )
+    
+    newPassword = serializers.CharField(
+        min_length=8,
+        error_messages={
+            'required': '请提供新密码',
+            'blank': '新密码不能为空',
+            'min_length': '密码长度不能少于8个字符',
+        }
+    )
+
+    def validate_phone(self, value):
+        """验证手机号是否已注册"""
+        try:
+            self.user = User.objects.get(phone_number=value)
+            return value
+        except User.DoesNotExist:
+            raise serializers.ValidationError("该手机号未注册")
+
+    def validate(self, data):
+        """验证密码复杂度"""
+        password = data.get('newPassword', '')
+        
+        # 验证密码复杂度
+        if not any(char.isdigit() for char in password):
+            raise serializers.ValidationError({"new_password": "密码必须包含至少一个数字"})
+        if not any(char.isalpha() for char in password):
+            raise serializers.ValidationError({"new_password": "密码必须包含至少一个字母"})
+            
+        return data

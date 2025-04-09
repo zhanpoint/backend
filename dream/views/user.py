@@ -9,7 +9,8 @@ from dream.serializers.user_serializers import (
     UserSerializer,
     UserLoginSerializer,
     UserRegistrationWithCodeSerializer,
-    PhoneVerifyCodeLoginSerializer
+    PhoneVerifyCodeLoginSerializer,
+    ResetPasswordSerializer
 )
 from dream.utils.sms import SMSService
 
@@ -328,3 +329,70 @@ class UserProfileAPIView(APIView):
             "code": 200,
             "data": serializer.data
         })
+
+class ResetPasswordAPIView(APIView):
+    """
+    密码重置API
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        """
+        处理POST请求，重置用户密码
+        
+        请求格式:
+        {
+            "phone": "13812345678",
+            "code": "123456",
+            "new_password": "newpass123"
+        }
+        
+        成功响应:
+        {
+            "code": 200,
+            "message": "密码重置成功"
+        }
+        """
+        # 1. 验证请求数据
+        serializer = ResetPasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            logger.warning(f"密码重置数据验证失败: {serializer.errors}")
+            return Response({
+                "code": 400,
+                "message": "重置失败",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. 验证短信验证码
+        phone = serializer.validated_data['phone']
+        code = serializer.validated_data['code']
+
+        logger.info(f"验证密码重置短信验证码, 手机号: {phone}")
+
+        if not SMSService.verify_code(phone, code):
+            logger.warning(f"密码重置验证码验证失败, 手机号: {phone}")
+            return Response({
+                "code": 400,
+                "message": "验证码错误或已过期",
+                "errors": {"code": ["验证码错误或已过期"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. 更新用户密码
+        try:
+            user = serializer.user
+            user.set_password(serializer.validated_data['newPassword'])
+            user.save()
+
+            logger.info(f"用户密码重置成功, 手机号: {phone}")
+
+            return Response({
+                "code": 200,
+                "message": "密码重置成功"
+            })
+
+        except Exception as e:
+            logger.exception(f"密码重置过程中发生异常: {str(e)}")
+            return Response({
+                "code": 500,
+                "message": "服务器错误，密码重置失败"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,5 +1,4 @@
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -14,7 +13,6 @@ from ..models import Dream, DreamCategory, Tag, DreamImage
 from dream.serializers.dream_serializers import (
     DreamSerializer,
     DreamCreateSerializer,
-    DreamImageSerializer
 )
 from dream.utils.oss import OSS
 
@@ -45,8 +43,6 @@ class DreamViewSet(viewsets.ModelViewSet):
         for dream in queryset:
             dream.content = self._insert_images_to_content(dream)
         serializer = self.get_serializer(queryset, many=True)
-        print(serializer.data)
-        print(Response(serializer.data))
         return Response(serializer.data)
 
     # 处理详情请求
@@ -96,8 +92,21 @@ class DreamViewSet(viewsets.ModelViewSet):
 
             # 序列化并返回完整的梦境数据
             dream.content = self._insert_images_to_content(dream)
+            
+            # 获取序列化数据并添加额外信息
             serializer = DreamSerializer(dream)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            response_data = serializer.data
+            
+            # 如果有等待处理的图片，添加WebSocket连接信息
+            has_images = request.FILES and any(key.startswith('imageFile_') for key in request.FILES.keys())
+            if has_images:
+                response_data['images_status'] = {
+                    'status': 'processing',
+                    'websocket_url': f'/ws/dream-images/{dream.id}/',
+                    'images': []  # 预留空图片列表，将通过WebSocket更新
+                }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             logger.error(f"创建梦境记录失败: {str(e)}")
@@ -107,8 +116,6 @@ class DreamViewSet(viewsets.ModelViewSet):
     # 处理更新请求
     @transaction.atomic
     def update(self, request, *args, **kwargs):
-        print(request.data)
-        print(request.FILES)
         try:
             # 获取当前梦境记录
             instance = self.get_object()
@@ -250,76 +257,50 @@ class DreamViewSet(viewsets.ModelViewSet):
                     tag.delete()
 
     def _process_image_uploads(self, dream, request):
-        # 创建OSS实例
-        oss = OSS(username=request.user.username)
-        oss.ensure_bucket_exists()
-
-        # 收集图片文件和元数据
-        for index, file_key in [(key.split('_')[1], value) for key, value in request.FILES.items() if
-                                key.startswith('imageFile_')]:
-            try:
-                # 获取位置信息
-                metadata_key = f'imageMetadata_{index}'
-                position = 0
-
-                if metadata_key in request.data:
-                    metadata = request.data.get(metadata_key)
-                    if metadata:
-                        if isinstance(metadata, str):
-                            metadata = json.loads(metadata)
-                        position = metadata.get('position', 0)
-
-                # 上传到OSS
-                image_url = oss.upload_file(file_key)
-
-                # 创建图片记录
-                DreamImage.objects.create(
-                    dream=dream,
-                    image_url=image_url,
-                    position=position
-                )
-                logger.info(f"成功上传图片: {image_url}")
-            except Exception as e:
-                logger.error(f"图片上传失败: {str(e)}")
-                raise ValidationError(f"图片上传失败: {str(e)}")
-
-    def _process_image_operations(self, dream, operations, request):
-        """处理图片的添加、删除和修改操作"""
-        oss = OSS(username=request.user.username)
-        oss.ensure_bucket_exists()
-
-        # 处理删除图片
-        deleted_images = operations.get('deleted', [])
-        if deleted_images:
-            for img_data in deleted_images:
+        """
+        处理图片上传
+        - 收集图片信息
+        - 通过Celery任务队列异步处理图片
+        """
+        try:
+            image_files = []
+            positions = []
+            
+            # 收集图片文件和元数据
+            for index, file_key in [(key.split('_')[1], value) for key, value in request.FILES.items() 
+                                  if key.startswith('imageFile_')]:
                 try:
-                    image = dream.images.filter(id=img_data.get('id')).first()
-                    # 从OSS中删除文件
-                    file_name = '/'.join(image.image_url.split('/')[-3:])
-                    try:
-
-                        oss.delete_file(file_name)
-                    except Exception as e:
-                        logger.warning(f"从OSS删除图片失败: {str(e)}")
-
-                    # 删除数据库记录
-                    image.delete()
-
+                    # 获取位置信息
+                    metadata_key = f'imageMetadata_{index}'
+                    position = 0
+                    
+                    if metadata_key in request.data:
+                        metadata = request.data.get(metadata_key)
+                        if metadata:
+                            if isinstance(metadata, str):
+                                metadata = json.loads(metadata)
+                            position = metadata.get('position', 0)
+                    
+                    # 读取文件数据
+                    file_data = file_key.read()
+                    
+                    # 添加到待处理列表
+                    image_files.append({
+                        'name': file_key.name,
+                        'data': file_data
+                    })
+                    positions.append(position)
+                    
                 except Exception as e:
-                    logger.error(f"删除图片失败: {str(e)}")
-
-        # 处理修改图片位置
-        modified_images = operations.get('modified', [])
-        if modified_images:
-            for img_data in modified_images:
-                try:
-                    image_id = img_data.get('id')
-                    new_position = img_data.get('newPosition')
-                    image = dream.images.filter(id=image_id).first()
-                    image.position = new_position
-                    image.save()
-                except Exception as e:
-                    logger.error(f"更新图片位置失败: {str(e)}")
-
-        # 处理新增图片
-        self._process_image_uploads(dream, request)
+                    logger.error(f"处理图片文件失败: {str(e)}")
+                    raise ValidationError(f"处理图片文件失败: {str(e)}")
+            
+            # 如果有图片需要处理，发送到Celery任务队列
+            if image_files:
+                from dream.utils.queue_manager import send_image_processing_task
+                send_image_processing_task(dream.id, image_files, positions)
+                logger.info(f"已将{len(image_files)}个图片发送到处理队列")
+                
+        except Exception as e:
+            logger.error(f"图片上传失败: {str(e)}")
+            raise ValidationError(f"图片上传失败: {str(e)}")

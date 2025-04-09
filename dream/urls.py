@@ -11,6 +11,7 @@ from .views.user import (
     PhoneLoginWithCodeAPIView,  # 手机号验证码登录API
     UserLogoutAPIView,  # 用户登出API
     UserProfileAPIView,  # 用户资料API
+    ResetPasswordAPIView,  # 密码重置API
 )
 from .views import oss
 from .views.dream import DreamViewSet
@@ -27,6 +28,7 @@ api_urlpatterns = [
     path('auth/login-with-code/', PhoneLoginWithCodeAPIView.as_view(), name='login-with-code'),
     path('auth/logout/', UserLogoutAPIView.as_view(), name='logout'),
     path('auth/profile/', UserProfileAPIView.as_view(), name='profile'),
+    path('auth/reset-password/', ResetPasswordAPIView.as_view(), name='reset-password'),
 
     
     # JWT令牌API

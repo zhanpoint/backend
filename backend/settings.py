@@ -43,9 +43,8 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # 添加JWT黑名单功能
     'coreapi',  # 添加coreapi用于API文档
     'corsheaders',  # 跨域支持
+    'channels',  # 添加Django Channels支持WebSocket
 ]
-
-
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # 必须放在其他中间件前面
@@ -112,7 +111,6 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'backend.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -121,6 +119,10 @@ DATABASES = {
     # Django需要通过MySQLdb模块与MySQL数据库进行交互，而这个模块在Windows环境下通常由mysqlclient库提供(记得安装)
     'default': {
         'ENGINE': 'django.db.backends.mysql',
+        'OPTIONS': {
+            'charset': 'utf8mb4',  # 关键配置
+            'init_command': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
+        },
         'HOST': 'localhost',
         'PORT': '3306',
         'NAME': 'dream',
@@ -132,7 +134,7 @@ DATABASES = {
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             'CONNECTION_POOL_KWARGS': {'max_connections': 10},
@@ -226,33 +228,80 @@ REST_FRAMEWORK = {
 
 # JWT设置
 from datetime import timedelta
+"""
+- 只想返回JSON：删除 BrowsableAPIRenderer
+- 需要更严格的访问控制：改用 IsAuthenticated
+- 想添加token认证：加入 TokenAuthentication
+"""
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,  # 是否允许刷新token
     'BLACKLIST_AFTER_ROTATION': True,  # 刷新token后，之前的token不再可用
     'UPDATE_LAST_LOGIN': True,  # 更新最后登录时间
-    
+
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
     'AUDIENCE': None,
     'ISSUER': None,
-    
+
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',  # 这是Django中HTTP头的特殊格式
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    
+
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
-    
+
     'JTI_CLAIM': 'jti',
 }
-"""
-- 只想返回JSON：删除 BrowsableAPIRenderer
-- 需要更严格的访问控制：改用 IsAuthenticated
-- 想添加token认证：加入 TokenAuthentication
-"""
 
+
+# RabbitMQ配置
+RABBITMQ_HOST = '127.0.0.1'  # RabbitMQ服务器地址
+RABBITMQ_PORT = 5672  # 端口号
+RABBITMQ_USER = 'dream_admin'  # 用户名
+RABBITMQ_PASSWORD = '333444lL'  # 密码
+RABBITMQ_VHOST = '/'  # 虚拟主机路径
+
+# Redis配置
+REDIS_HOST = '127.0.0.1'
+REDIS_PORT = 6379
+REDIS_PASSWORD = '333444'  # Redis密码
+REDIS_DB = 0  # 使用的数据库编号
+
+# Celery配置
+# 使用RabbitMQ作为消息代理
+CELERY_BROKER_URL = f'amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}'
+# Redis结果后端配置(带密码认证)
+CELERY_RESULT_BACKEND = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+CELERY_REDIS_MAX_CONNECTIONS = 10  # Redis连接池最大连接数
+
+# Celery序列化设置
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Shanghai'
+CELERY_ENABLE_UTC = True
+
+# Redis结果过期时间(秒)
+CELERY_TASK_RESULT_EXPIRES = 60 * 60  # 1小时
+
+# 任务执行设置
+CELERY_TASK_ACKS_LATE = True  # 任务执行完成后再确认
+CELERY_TASK_REJECT_ON_WORKER_LOST = True  # worker异常退出时拒绝任务
+
+# 添加ASGI应用，替换WSGI配置
+ASGI_APPLICATION = 'backend.asgi.application'
+
+# 添加Channel Layers配置，使用Redis作为后端
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [f'redis://:{redis_password}@127.0.0.1:6379/2'],
+        },
+    },
+}

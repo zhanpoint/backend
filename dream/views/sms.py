@@ -36,7 +36,7 @@ class SendVerificationCodeAPIView(APIView):
         logger.debug(f"为手机 {phone} 生成验证码: {verification_code}")
 
         # 3. 将验证码存入Redis
-        stored = SMSService.store_code_in_redis(phone, verification_code)
+        stored = SMSService.store_code_in_redis(phone, verification_code, expires=60)
         if not stored:
             logger.error(f"无法将验证码存储到Redis，手机号: {phone}")
             return Response({
