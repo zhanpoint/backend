@@ -48,3 +48,6 @@ credentials.py
 
 # 忽略日志文件
 logs/
+
+# cursor规则文件
+.cursor

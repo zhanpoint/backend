@@ -8,6 +8,7 @@ def main():
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
     try:
+        # 引入Django管理命令
         from django.core.management import execute_from_command_line
     except ImportError as exc:
         raise ImportError(
@@ -15,6 +16,7 @@ def main():
             "available on your PYTHONPATH environment variable? Did you "
             "forget to activate a virtual environment?"
         ) from exc
+    # 运行命令行Django管理命令（sys.argv 包含了命令行参数列表）
     execute_from_command_line(sys.argv)
 
 

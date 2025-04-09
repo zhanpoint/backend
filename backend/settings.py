@@ -47,7 +47,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # 必须放在其他中间件前面
+    'corsheaders.middleware.CorsMiddleware',  # 跨域支持，必须在最前面
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -59,8 +59,7 @@ MIDDLEWARE = [
 
 # 只允许特定域名访问(生产环境)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",  # vite构建的React项目的默认端口
+    "http://0.0.0.0:5173",  # vite构建的React项目的默认端口
 ]
 
 # 允许携带认证信息（cookies等）
@@ -78,39 +77,19 @@ CORS_ALLOW_METHODS = [
 
 # 允许的请求头
 CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
+    # accept 和 accept-encoding 是不必要的，因为这些是浏览器默认会发送的标准请求头，不需要特别声明允许。
+    'authorization',  # 用于JWT认证
+    'content-type',  # 用于指定请求体的格式
 ]
 
 # 允许暴露的响应头
-CORS_EXPOSE_HEADERS = ['Content-Length', 'Content-Type']
-
-ROOT_URLCONF = 'backend.urls'
-
-TEMPLATES = [
-    {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
-        ,
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
-    },
+CORS_EXPOSE_HEADERS = [
+    # Content-Length 是不必要的，因为这是标准响应头，浏览器默认就可以访问
+    'Content-Type',  # 用于指定响应内容的类型
+    'Authorization',  # 用于JWT token的传递
 ]
 
+ROOT_URLCONF = 'backend.urls'
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -120,7 +99,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'OPTIONS': {
-            'charset': 'utf8mb4',  # 关键配置
+            'charset': 'utf8mb4',
             'init_command': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
         },
         'HOST': 'localhost',
@@ -170,7 +149,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ch-zh'
 
 TIME_ZONE = 'Asia/Shanghai'
 
@@ -180,8 +159,6 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
-
-STATIC_URL = 'static/'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -195,69 +172,40 @@ AUTH_USER_MODEL = 'dream.User'
 # 密码哈希设置
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.PBKDF2PasswordHasher',
-    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
-    'django.contrib.auth.hashers.Argon2PasswordHasher',
-    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
 ]
 
 # REST Framework 配置
 REST_FRAMEWORK = {
-    # 数据渲染器
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',  # 把数据转换成JSON格式返回
-        'rest_framework.renderers.BrowsableAPIRenderer',  # 允许在浏览器中查看API文档
     ],
-    # 数据解析器
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',  # 解析JSON格式的请求数据
-        'rest_framework.parsers.FormParser',  # 解析表单数据
         'rest_framework.parsers.MultiPartParser',  # 解析文件上传数据
     ],
-    # 认证方式
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',  # 方式二：DRF的官方JWT认证
+        'rest_framework_simplejwt.authentication.JWTAuthentication',  # JWT认证
     ],
-    # 权限设置
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # 允许任何用户访问API
     ],
-    # 异常处理
-    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',  # 默认的异常处理函数
-    'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',  # 使用CoreAPI的AutoSchema生成API文档
 }
 
 # JWT设置
 from datetime import timedelta
-"""
-- 只想返回JSON：删除 BrowsableAPIRenderer
-- 需要更严格的访问控制：改用 IsAuthenticated
-- 想添加token认证：加入 TokenAuthentication
-"""
+
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),  # 访问token的有效期，默认为1小时
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # 刷新token的有效期，默认为7天
     'ROTATE_REFRESH_TOKENS': True,  # 是否允许刷新token
     'BLACKLIST_AFTER_ROTATION': True,  # 刷新token后，之前的token不再可用
     'UPDATE_LAST_LOGIN': True,  # 更新最后登录时间
-
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'VERIFYING_KEY': None,
-    'AUDIENCE': None,
-    'ISSUER': None,
-
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',  # 这是Django中HTTP头的特殊格式
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
-
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-    'TOKEN_TYPE_CLAIM': 'token_type',
-    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
-
-    'JTI_CLAIM': 'jti',
+    'ALGORITHM': 'HS256',  # 签名算法
+    'SIGNING_KEY': SECRET_KEY,  # 密钥:盐加密
+    'AUTH_HEADER_TYPES': ('Bearer',),  # 认证头类型
+    'USER_ID_FIELD': 'id',  # 用户ID字段
+    'USER_ID_CLAIM': 'user_id',  # 用户ID的Claim
 }
-
 
 # RabbitMQ配置
 RABBITMQ_HOST = '127.0.0.1'  # RabbitMQ服务器地址

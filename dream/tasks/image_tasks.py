@@ -117,9 +117,9 @@ def process_and_upload_images(self, dream_id: int, encoded_files: List[Dict], po
                     )
                 time.sleep(RETRY_DELAY_FOR_DREAM_FETCH)
                 continue
-                
-        # 获取Dream实例
-        dream = Dream.objects.get(id=dream_id)
+            
+            # 获取Dream实例
+            dream = Dream.objects.get(id=dream_id)
             # 成功获取，跳出循环
             logger.info(f"成功获取梦境记录: ID={dream_id}, 用户={dream.user.username}")
             break

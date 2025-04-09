@@ -21,7 +21,10 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 # 初始化Django ASGI应用
 django_asgi_app = get_asgi_application()
 
+# 初始化Django
 django.setup()
+
+# 导入WebSocket路由
 import dream.routing  # websocket路由
 
 # 配置ASGI应用，支持HTTP和WebSocket协议

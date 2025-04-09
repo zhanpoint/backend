@@ -235,6 +235,7 @@ class PhoneLoginWithCodeAPIView(APIView):
         })
     # 用户登出API
 
+
 # 用户登出API
 class UserLogoutAPIView(APIView):
     """
@@ -260,7 +261,7 @@ class UserLogoutAPIView(APIView):
         try:
             # 获取请求中的refresh token
             refresh_token = request.data.get('refresh')
-            
+
             # 如果请求中包含refresh token，将其加入黑名单
             if refresh_token:
                 # 创建RefreshToken对象
@@ -274,32 +275,32 @@ class UserLogoutAPIView(APIView):
                 auth_header = request.headers.get('Authorization', '')
                 if auth_header.startswith('Bearer '):
                     access_token = auth_header.split(' ')[1]
-                    
+
                     # 通过解码access token获取user_id
                     # 注意：这不会将access token加入黑名单，但可以记录该用户所有token已失效
                     logger.info(f"用户 {request.user.username} 的access token已记录为失效")
-            
+
             # 记录用户退出
             logger.info(f"用户 {request.user.username} 退出登录")
-            
+
             # 调用Django的登出方法清除session
             logout(request)
-            
+
             return Response({
                 "code": 200,
                 "message": "退出成功，令牌已失效"
             })
-            
+
         except Exception as e:
             logger.error(f"退出登录过程中出错: {str(e)}")
             # 即使出错，也要尝试登出
             logout(request)
-            
+
             return Response({
                 "code": 200,
                 "message": "退出成功，但令牌失效处理可能不完整"
             })
-            
+
 
 # 用户个人资料API
 class UserProfileAPIView(APIView):
@@ -329,6 +330,7 @@ class UserProfileAPIView(APIView):
             "code": 200,
             "data": serializer.data
         })
+
 
 class ResetPasswordAPIView(APIView):
     """

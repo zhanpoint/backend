@@ -1,6 +1,7 @@
 import os
 from celery import Celery
 from kombu import Exchange, Queue
+from celery.schedules import crontab
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,14 @@ app.conf.task_routes = {
         'queue': 'dream_image_processing',
         'exchange': 'dream_images',
         'routing_key': 'image_processing',
+    },
+}
+
+# 配置定时任务
+app.conf.beat_schedule = {
+    'cleanup-expired-tokens': {
+        'task': 'dream.tasks.token_tasks.cleanup_expired_tokens',
+        'schedule': crontab(hour=3, minute=0),  # 每天凌晨3点执行
     },
 }
 

@@ -11,7 +11,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
 from channels.db import database_sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
-from .models import Dream, User, DreamImage, DreamImageProcessing
+from .models import Dream, User, DreamImage
 
 logger = logging.getLogger(__name__)
 
