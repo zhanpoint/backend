@@ -41,8 +41,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# 自定义敏感文件
-*.env
+# 环境变量和敏感信息
+.env
+.env.*
+!.env.example
 secrets.py
 credentials.py
 

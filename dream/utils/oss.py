@@ -4,7 +4,7 @@ from aliyunsdksts.request.v20150401 import AssumeRoleRequest
 import json
 import time
 import uuid
-from backend import local_settings
+from config import ALIYUN_CONFIG
 import re
 import logging
 
@@ -23,12 +23,12 @@ class OSS:
                 username = username[0] if len(username) > 0 else 'unknown'
             self.username = str(username).strip()
 
-            self.access_key_id = local_settings.ALIBABA_CLOUD_ACCESS_RAM_USER_KEY_ID
-            self.access_key_secret = local_settings.ALIBABA_CLOUD_ACCESS_RAM_USER_KEY_SECRET
-            self.role_arn = local_settings.ALIYUN_STS_ROLE_OSS_ARN
+            self.access_key_id = ALIYUN_CONFIG.get('access_key_id')
+            self.access_key_secret = ALIYUN_CONFIG.get('access_key_secret')
+            self.role_arn = ALIYUN_CONFIG.get('sts_role_oss_arn')
 
             # 处理endpoint配置
-            self.endpoint = str(local_settings.ALIYUN_OSS_ENDPOINT).strip()  # 强制转换为字符串
+            self.endpoint = str(ALIYUN_CONFIG.get('oss_endpoint')).strip()  # 强制转换为字符串
             if not self.endpoint.startswith(('http://', 'https://')):
                 self.endpoint = f'https://{self.endpoint}'
 

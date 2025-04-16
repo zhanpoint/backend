@@ -2,27 +2,7 @@ from rest_framework import serializers
 from django.core.validators import RegexValidator
 from django.contrib.auth import authenticate
 from dream.models import User
-
-
-class PhoneSerializer(serializers.Serializer):
-    """
-    手机号验证序列化器
-    """
-    phone = serializers.CharField(
-        max_length=11,
-        validators=[
-            RegexValidator(
-                regex=r'^1[3-9]\d{9}$',
-                message='请输入有效的中国大陆手机号'
-            )
-        ],
-        error_messages={
-            'required': '请提供手机号',
-            'blank': '手机号不能为空',
-            'max_length': '手机号最多为11个字符',
-        }
-    )
-
+import re
 
 class UserSerializer(serializers.ModelSerializer):
     """
@@ -274,3 +254,19 @@ class ResetPasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"new_password": "密码必须包含至少一个字母"})
             
         return data
+
+
+class SmsCodeRequestSerializer(serializers.Serializer):
+    """短信验证码请求序列化器"""
+    phone = serializers.CharField(required=True)
+    scene = serializers.ChoiceField(
+        choices=['register', 'login', 'reset_password'],
+        default='register',
+        required=False
+    )
+    
+    def validate_phone(self, value):
+        """验证手机号格式"""
+        if not re.match(r'^1[3-9]\d{9}$', value):
+            raise serializers.ValidationError("请输入有效的手机号码")
+        return value

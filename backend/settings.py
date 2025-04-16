@@ -11,7 +11,13 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
-from .local_settings import mysql_password, redis_password
+import os
+from config import (
+    DEBUG, SECRET_KEY, ALLOWED_HOSTS,
+    DATABASE, CACHES_CONFIG, REDIS_CONFIG,
+    RABBITMQ_CONFIG, CELERY_CONFIG, ALIYUN_CONFIG,
+    JWT_CONFIG
+)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,13 +26,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-fe1*#ihdw0+-9!-lt1-1mzj4rnby9=xia)*1!kmxi!8y=i+1pz'
+SECRET_KEY = SECRET_KEY
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# 开发模式
-DEBUG = True
+DEBUG = DEBUG
 
-ALLOWED_HOSTS = []  # DEBUG=True，默认允许"localhost"和"127.0.0.1"访问，如果DEBUG=False，没有任何人能访问
+ALLOWED_HOSTS = ALLOWED_HOSTS
 
 # Application definition
 
@@ -37,17 +42,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'dream.apps.DreamConfig',
-    'rest_framework',  # 添加DRF
-    'rest_framework_simplejwt',  # 添加SimpleJWT
-    'rest_framework_simplejwt.token_blacklist',  # 添加JWT黑名单功能
-    'coreapi',  # 添加coreapi用于API文档
-    'corsheaders',  # 跨域支持
-    'channels',  # 添加Django Channels支持WebSocket
+    'corsheaders',
+    'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
+    'channels',
+    'dream',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # 跨域支持，必须在最前面
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -59,7 +62,7 @@ MIDDLEWARE = [
 
 # 只允许特定域名访问(生产环境)
 CORS_ALLOWED_ORIGINS = [
-    "http://0.0.0.0:5173",  # vite构建的React项目的默认端口
+    "http://localhost:5173",
 ]
 
 # 允许携带认证信息（cookies等）
@@ -91,37 +94,31 @@ CORS_EXPOSE_HEADERS = [
 
 ROOT_URLCONF = 'backend.urls'
 
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'backend.wsgi.application'
+
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    # Django需要通过MySQLdb模块与MySQL数据库进行交互，而这个模块在Windows环境下通常由mysqlclient库提供(记得安装)
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
-        },
-        'HOST': 'localhost',
-        'PORT': '3306',
-        'NAME': 'dream',
-        'USER': 'root',
-        'PASSWORD': mysql_password,
-    }
-}
+DATABASES = DATABASE
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'CONNECTION_POOL_KWARGS': {'max_connections': 10},
-            'PASSWORD': redis_password,
-        },
-        'TIMEOUT': 1209600,
-    }
-}
+# Cache
+CACHES = CACHES_CONFIG
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -149,13 +146,13 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'ch-zh'
+LANGUAGE_CODE = 'zh-CN'
 
 TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
-USE_TZ = True
+USE_TZ = False  # 这个设置为True时，Django内部使用UTC，只在展示时转换
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
@@ -192,54 +189,41 @@ REST_FRAMEWORK = {
 }
 
 # JWT设置
-from datetime import timedelta
-
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),  # 访问token的有效期，默认为1小时
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # 刷新token的有效期，默认为7天
-    'ROTATE_REFRESH_TOKENS': True,  # 是否允许刷新token
-    'BLACKLIST_AFTER_ROTATION': True,  # 刷新token后，之前的token不再可用
-    'UPDATE_LAST_LOGIN': True,  # 更新最后登录时间
-    'ALGORITHM': 'HS256',  # 签名算法
-    'SIGNING_KEY': SECRET_KEY,  # 密钥:盐加密
-    'AUTH_HEADER_TYPES': ('Bearer',),  # 认证头类型
-    'USER_ID_FIELD': 'id',  # 用户ID字段
-    'USER_ID_CLAIM': 'user_id',  # 用户ID的Claim
-}
+SIMPLE_JWT = JWT_CONFIG
 
 # RabbitMQ配置
-RABBITMQ_HOST = '127.0.0.1'  # RabbitMQ服务器地址
-RABBITMQ_PORT = 5672  # 端口号
-RABBITMQ_USER = 'dream_admin'  # 用户名
-RABBITMQ_PASSWORD = '333444lL'  # 密码
-RABBITMQ_VHOST = '/'  # 虚拟主机路径
+RABBITMQ_HOST = RABBITMQ_CONFIG['host']
+RABBITMQ_PORT = RABBITMQ_CONFIG['port']
+RABBITMQ_USER = RABBITMQ_CONFIG['user']
+RABBITMQ_PASSWORD = RABBITMQ_CONFIG['password']
+RABBITMQ_VHOST = RABBITMQ_CONFIG['vhost']
 
 # Redis配置
-REDIS_HOST = '127.0.0.1'
-REDIS_PORT = 6379
-REDIS_PASSWORD = '333444'  # Redis密码
+REDIS_HOST = REDIS_CONFIG['host']
+REDIS_PORT = REDIS_CONFIG['port']
+REDIS_PASSWORD = REDIS_CONFIG['password']  # Redis密码
 REDIS_DB = 0  # 使用的数据库编号
 
 # Celery配置
 # 使用RabbitMQ作为消息代理
-CELERY_BROKER_URL = f'amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}'
+CELERY_BROKER_URL = CELERY_CONFIG['broker_url']
 # Redis结果后端配置(带密码认证)
-CELERY_RESULT_BACKEND = f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
-CELERY_REDIS_MAX_CONNECTIONS = 10  # Redis连接池最大连接数
+CELERY_RESULT_BACKEND = CELERY_CONFIG['result_backend']
+CELERY_REDIS_MAX_CONNECTIONS = CELERY_CONFIG['redis_max_connections']
 
 # Celery序列化设置
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'Asia/Shanghai'
-CELERY_ENABLE_UTC = True
+CELERY_ACCEPT_CONTENT = CELERY_CONFIG['accept_content']
+CELERY_TASK_SERIALIZER = CELERY_CONFIG['task_serializer']
+CELERY_RESULT_SERIALIZER = CELERY_CONFIG['result_serializer']
+CELERY_TIMEZONE = CELERY_CONFIG['timezone']
+CELERY_ENABLE_UTC = CELERY_CONFIG['enable_utc']
 
 # Redis结果过期时间(秒)
-CELERY_TASK_RESULT_EXPIRES = 60 * 60  # 1小时
+CELERY_TASK_RESULT_EXPIRES = CELERY_CONFIG['task_result_expires']
 
 # 任务执行设置
-CELERY_TASK_ACKS_LATE = True  # 任务执行完成后再确认
-CELERY_TASK_REJECT_ON_WORKER_LOST = True  # worker异常退出时拒绝任务
+CELERY_TASK_ACKS_LATE = CELERY_CONFIG['task_acks_late']
+CELERY_TASK_REJECT_ON_WORKER_LOST = CELERY_CONFIG['task_reject_on_worker_lost']
 
 # 添加ASGI应用，替换WSGI配置
 ASGI_APPLICATION = 'backend.asgi.application'
@@ -249,7 +233,11 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [f'redis://:{redis_password}@127.0.0.1:6379/2'],
+            "hosts": [f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/2'],
         },
     },
 }
+
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')

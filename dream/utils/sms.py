@@ -5,7 +5,7 @@ from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.auth.credentials import StsTokenCredential
 from aliyunsdkcore.request import CommonRequest
 from aliyunsdksts.request.v20150401.AssumeRoleRequest import AssumeRoleRequest
-from backend import local_settings
+from config import ALIYUN_CONFIG
 from django.core.cache import cache
 from datetime import datetime
 from dateutil import parser
@@ -19,10 +19,10 @@ class SMSService:
 
     def __init__(self):
         # 从Django配置中读取阿里云访问凭证
-        self.access_key_id = local_settings.ALIBABA_CLOUD_ACCESS_RAM_USER_KEY_ID
-        self.access_key_secret = local_settings.ALIBABA_CLOUD_ACCESS_RAM_USER_KEY_SECRET
-        self.sts_role_arn = local_settings.ALIYUN_STS_ROLE_SMS_ARN
-        self.region_id = local_settings.ALIYUN_REGION_ID
+        self.access_key_id = ALIYUN_CONFIG.get('access_key_id')
+        self.access_key_secret = ALIYUN_CONFIG.get('access_key_secret')
+        self.sts_role_arn = ALIYUN_CONFIG.get('sts_role_sms_arn')
+        self.region_id = ALIYUN_CONFIG.get('region_id', 'cn-wuhan-lr')
         # 缓存键名
         self.cache_key = 'aliyun_sts_credentials'  # 应该根据session ID来确定缓存键
         # 设置提前刷新阈值(秒)，凭证过期前5分钟就刷新
@@ -176,7 +176,7 @@ class SMSService:
 
             # 设置短信API的请求参数
             request.add_query_param('PhoneNumbers', phone_numbers)
-            request.add_query_param('SignName', local_settings.ALIYUN_SMS_SIGN1)  # 签名id
+            request.add_query_param('SignName', ALIYUN_CONFIG.get('sms_sign_name'))  # 签名id
             request.add_query_param('TemplateCode', template_code)  # 模版id
 
             if template_param:
