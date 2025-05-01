@@ -14,7 +14,7 @@ from dream.serializers.dream_serializers import (
     DreamSerializer,
     DreamCreateSerializer,
 )
-from dream.utils.oss import OSS
+from dream.celery.tasks.image_tasks import upload_images, delete_images
 
 
 class DreamViewSet(viewsets.ModelViewSet):
@@ -235,8 +235,7 @@ class DreamViewSet(viewsets.ModelViewSet):
             
             # 如果有图片需要删除，发送到Celery任务队列
             if image_details:
-                from dream.utils.queue_manager import send_image_delete_task
-                send_image_delete_task(dream_id, image_details, username)
+                delete_images(dream_id, image_details, username)
                 logger.info(f"已将{len(image_details)}个图片发送到删除队列")
                 
         except Exception as e:
@@ -355,8 +354,7 @@ class DreamViewSet(viewsets.ModelViewSet):
             
             # 如果有图片需要处理，发送到Celery任务队列
             if image_files:
-                from dream.utils.queue_manager import send_image_processing_task
-                send_image_processing_task(dream.id, image_files, positions)
+                upload_images(dream.id, image_files, positions)
                 logger.info(f"已将{len(image_files)}个图片发送到处理队列")
                 
         except Exception as e:
@@ -385,14 +383,14 @@ class DreamViewSet(viewsets.ModelViewSet):
                     'url': image.image_url
                 })
             
-            # 先删除梦境记录
-            response = super().destroy(request, *args, **kwargs)
-            
-            # 如果有图片需要删除，则异步删除
+            # 如果有图片需要删除，先发送异步删除任务
             if image_urls:
-                from dream.utils.queue_manager import send_image_delete_task
-                send_image_delete_task(dream_id, image_urls, username)
-                logger.info(f"已将{len(image_urls)}个图片发送到删除队列")
+                # 关键修复：先发送异步删除任务，再删除梦境记录
+                task_id = delete_images(dream_id, image_urls, username)
+                logger.info(f"已将{len(image_urls)}个图片发送到删除队列, 任务ID: {task_id}")
+            
+            # 最后删除梦境记录
+            response = super().destroy(request, *args, **kwargs)
             
             return response
             

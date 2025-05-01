@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
-    'channels',
+    'channels',  # 使Django识别WebSocket功能
     'dream',
 ]
 
@@ -225,10 +225,10 @@ CELERY_TASK_RESULT_EXPIRES = CELERY_CONFIG['task_result_expires']
 CELERY_TASK_ACKS_LATE = CELERY_CONFIG['task_acks_late']
 CELERY_TASK_REJECT_ON_WORKER_LOST = CELERY_CONFIG['task_reject_on_worker_lost']
 
-# 添加ASGI应用，替换WSGI配置
+# 由于WSGI只支持HTTP协议，而asgi模块支持WebSocket协议
 ASGI_APPLICATION = 'backend.asgi.application'
 
-# 添加Channel Layers配置，使用Redis作为后端
+# - 配置消息层，用于处理WebSocket连接之间的通信
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',

@@ -25,15 +25,15 @@ django_asgi_app = get_asgi_application()
 django.setup()
 
 # 导入WebSocket路由
-import dream.routing  # websocket路由
+from dream.websocket.routing import websocket_urlpatterns  # 更新为新的导入路径
 
-# 配置ASGI应用，支持HTTP和WebSocket协议
-application = ProtocolTypeRouter({
+
+application = ProtocolTypeRouter({  # - 根据不同的协议类型（HTTP/WebSocket）路由到不同的处理器
     "http": django_asgi_app,  # Django视图处理HTTP请求
     "websocket": AllowedHostsOriginValidator(  # 验证WebSocket请求来源
-        AuthMiddlewareStack(  # 提供认证功能
-            URLRouter(
-                dream.routing.websocket_urlpatterns  # WebSocket路由配置
+        AuthMiddlewareStack(  # 提供认证中间件
+            URLRouter(  # 处理WebSocket的URL路由
+                websocket_urlpatterns  # 自定义的WebSocket路由配置
             )
         )
     ),
