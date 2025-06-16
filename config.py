@@ -3,59 +3,44 @@
 负责加载和管理环境变量配置
 """
 
-import os
 from pathlib import Path
 from datetime import timedelta
+import environ
 
-from dotenv import load_dotenv
+# 对需要进行类型转换的环境变量中进行初始化，
+env = environ.Env(
+    DEBUG=(bool, True),
+    ALLOWED_HOSTS=(list, ['localhost', '127.0.0.1', '120.216.67.22']),
+    DB_PORT=(int, 3306),
+    REDIS_PORT=(int, 6379),
+    REDIS_DB=(int, 0),
+    RABBITMQ_PORT=(int, 5672),
+    JWT_ACCESS_TOKEN_LIFETIME_MINUTES=(int, 60),
+    JWT_REFRESH_TOKEN_LIFETIME_DAYS=(int, 7),
+)
+
+# 读取项目最外层的.env文件
+# 获取当前文件的路径，向上两级到达项目根目录
+project_root = Path(__file__).resolve().parent
+env_path = project_root / '.env'
 
 # 加载.env文件
-#   获取当前文件的路径，解析所有符号链接，将路径转换为完整的绝对路径，并获取绝对路径的父目录，Path对象重载了 / 运算符，用于路径拼接
-env_path = Path(__file__).resolve().parent / '.env'
-#   加载指定路径的.env文件到环境变量
-load_dotenv(env_path)
-
-
-def get_env_value(key: str, default: any = None, cast_type: type = str) -> any:
-    """
-    获取环境变量值，支持类型转换和默认值
-
-    参数:
-        key: 环境变量名
-        default: 当环境变量不存在或转换失败时返回的默认值
-        cast_type: 目标类型 (默认为str)
-
-    返回:
-        转换后的环境变量值或默认值
-    """
-    value = os.getenv(key, default)
-    if value is None:
-        return default
-
-    if cast_type == bool:
-        return str(value).lower() in ('true', '1', 'yes')
-    if cast_type == list:
-        return [x.strip() for x in str(value).split(',') if x.strip()]
-    try:
-        return cast_type(value)
-    except (ValueError, TypeError):
-        return default
-
+environ.Env.read_env(env_path)
 
 # Django基础配置
-DEBUG = get_env_value('DEBUG', True, bool)
-SECRET_KEY = get_env_value('SECRET_KEY', 'django-insecure-default-key-change-me')
-ALLOWED_HOSTS = get_env_value('ALLOWED_HOSTS', 'localhost,127.0.0.1', list)
+DEBUG = env('DEBUG')
+DJANGO_SECRET_KEY = env('DJANGO_SECRET_KEY')
+ALLOWED_HOSTS = env('ALLOWED_HOSTS')
 
 # 数据库配置
 DATABASE = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': get_env_value('DB_NAME', 'dream'),
-        'USER': get_env_value('DB_USER', 'root'),
-        'PASSWORD': get_env_value('DB_PASSWORD', ''),
-        'HOST': get_env_value('DB_HOST', 'localhost'),
-        'PORT': get_env_value('DB_PORT', 3306, int),
+        'NAME': env('DB_NAME', default='dream'),
+        'USER': env('DB_USER', default='root'),
+        'PASSWORD': env('DB_PASSWORD', default=''),
+        'HOST': env('DB_HOST', default='localhost'),
+        'PORT': env('DB_PORT'),
         'OPTIONS': {
             'charset': 'utf8mb4',
             'init_command': 'SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci',
@@ -65,10 +50,10 @@ DATABASE = {
 
 # Redis配置(缓存0，celery1，websocket2)
 REDIS_CONFIG = {
-    'host': get_env_value('REDIS_HOST', '127.0.0.1'),
-    'port': get_env_value('REDIS_PORT', 6379, int),
-    'password': get_env_value('REDIS_PASSWORD', ''),
-    'db': get_env_value('REDIS_DB', 0, int),
+    'host': env('REDIS_HOST', default='127.0.0.1'),
+    'port': env('REDIS_PORT'),
+    'password': env('REDIS_PASSWORD', default=''),
+    'db': env('REDIS_DB'),
 }
 
 # Redis缓存配置
@@ -87,11 +72,11 @@ CACHES_CONFIG = {
 
 # RabbitMQ配置
 RABBITMQ_CONFIG = {
-    'host': get_env_value('RABBITMQ_HOST', '127.0.0.1'),
-    'port': get_env_value('RABBITMQ_PORT', 5672, int),
-    'user': get_env_value('RABBITMQ_USER', 'guest'),
-    'password': get_env_value('RABBITMQ_PASSWORD', 'guest'),
-    'vhost': get_env_value('RABBITMQ_VHOST', '/'),
+    'host': env('RABBITMQ_HOST', default='127.0.0.1'),
+    'port': env('RABBITMQ_PORT'),
+    'user': env('RABBITMQ_DEFAULT_USER', default='guest'),
+    'password': env('RABBITMQ_DEFAULT_PASS', default='guest'),
+    'vhost': env('RABBITMQ_VHOST', default='/'),
 }
 
 # Celery配置
@@ -111,28 +96,28 @@ CELERY_CONFIG = {
 
 # 阿里云配置
 ALIYUN_CONFIG = {
-    'access_key_id': get_env_value('ALIYUN_ACCESS_KEY_ID'),
-    'access_key_secret': get_env_value('ALIYUN_ACCESS_KEY_SECRET'),
-    'oss_endpoint': get_env_value('ALIYUN_OSS_ENDPOINT'),
-    'sts_role_oss_arn': get_env_value('ALIYUN_STS_ROLE_OSS_ARN'),
-    'sts_role_sms_arn': get_env_value('ALIYUN_STS_ROLE_SMS_ARN'),
-    'region_id': get_env_value('ALIYUN_REGION_ID', 'cn-wuhan-lr'),
-    'sms_sign_name': get_env_value('ALIYUN_SMS_SIGN1'),
-    'sms_template_code_register': get_env_value('ALIYUN_SMS_TEMPLATE_REGISTER'),
-    'sms_template_code_login': get_env_value('ALIYUN_SMS_TEMPLATE_LOGIN'),
-    'sms_template_code_resetpassword': get_env_value('ALIYUN_SMS_TEMPLATE_RESETPASSWORD'),
+    'access_key_id': env('ALIYUN_ACCESS_KEY_ID', default=None),
+    'access_key_secret': env('ALIYUN_ACCESS_KEY_SECRET', default=None),
+    'oss_endpoint': env('ALIYUN_OSS_ENDPOINT', default=None),
+    'sts_role_oss_arn': env('ALIYUN_STS_ROLE_OSS_ARN', default=None),
+    'sts_role_sms_arn': env('ALIYUN_STS_ROLE_SMS_ARN', default=None),
+    'region_id': env('ALIYUN_REGION_ID', default='cn-wuhan-lr'),
+    'sms_sign_name': env('ALIYUN_SMS_SIGN1', default=None),
+    'sms_template_code_register': env('ALIYUN_SMS_TEMPLATE_REGISTER', default=None),
+    'sms_template_code_login': env('ALIYUN_SMS_TEMPLATE_LOGIN', default=None),
+    'sms_template_code_resetpassword': env('ALIYUN_SMS_TEMPLATE_RESETPASSWORD', default=None),
 }
 
 # JWT配置
 # DRF SimpleJWT内部使用的是UTC时间来处理token的过期时间,OutstandingToken模型直接使用了JWT中的原始时间信息(UTC时间)
 JWT_CONFIG = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=get_env_value('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', 60, int)),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=get_env_value('JWT_REFRESH_TOKEN_LIFETIME_DAYS', 7, int)),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=env('JWT_ACCESS_TOKEN_LIFETIME_MINUTES')),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=env('JWT_REFRESH_TOKEN_LIFETIME_DAYS')),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
+    'SIGNING_KEY': DJANGO_SECRET_KEY,
     'AUTH_HEADER_TYPES': ('Bearer',),
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',

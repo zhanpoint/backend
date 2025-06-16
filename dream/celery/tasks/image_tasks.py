@@ -1,28 +1,3 @@
-"""
-图片处理任务模块
-
-本模块负责处理图片的上传、处理和删除任务，包括以下组件：
-
-1. 任务定义 (Celery 任务)
-   - process_and_upload_images: 处理和上传图片的 Celery 任务
-   - delete_dream_images: 删除图片的 Celery 任务
-
-2. 工具函数
-   - process_image: 在进程池中处理单个图片
-   - upload_images: 向 Celery 队列提交图片处理任务
-   - delete_images: 向 Celery 队列提交图片删除任务
-
-工作流程:
-  视图层 -> upload_images/delete_images -> Celery 队列 -> Celery Worker
-                                                        ↓
-  前端 <- WebSocket 消费者 <- WebSocket 通知工具 <- 任务执行结果
-
-优化说明:
-1. 使用多进程处理图片，提高 CPU 密集型操作的效率
-2. 图片处理完成后通过 WebSocket 推送实时状态更新
-3. 统一了任务提交和执行流程，简化了代码结构
-"""
-
 import logging
 from PIL import Image
 import io
@@ -84,7 +59,7 @@ def process_image(image_data: bytes, filename: str, max_size: int = 1024 * 1024)
 
 # 任务执行
 @shared_task(bind=True, max_retries=5, retry_backoff=True, retry_backoff_max=600, time_limit=300)
-def process_and_upload_images(self, dream_id: int, encoded_files: List[Dict], positions: List[int]) -> List[str]:
+def celery_upload_images(self, dream_id: int, encoded_files: List[Dict], positions: List[int]) -> List[str]:
     """处理并上传多个图片的Celery任务"""
     # 参数验证
     if not isinstance(dream_id, int) or dream_id <= 0 or not encoded_files or len(encoded_files) != len(positions):
@@ -155,7 +130,7 @@ def process_and_upload_images(self, dream_id: int, encoded_files: List[Dict], po
 
 
 @shared_task(bind=True, max_retries=5, retry_backoff=True, retry_backoff_max=600, time_limit=300)
-def delete_dream_images(self, dream_id: int, image_urls: List[Dict], username: str) -> List[bool]:
+def celery_delete_images(self, dream_id: int, image_urls: List[Dict], username: str) -> List[bool]:
     """删除梦境相关的所有图片"""
     if not image_urls:
         send_image_update(dream_id, [], status='delete_completed', message='没有图片需要删除')
@@ -209,7 +184,7 @@ def upload_images(dream_id: int, image_files: List[Dict], positions: List[int]) 
         } for file in image_files]
 
         # 发送Celery任务
-        result = process_and_upload_images.delay(dream_id, encoded_files, positions)
+        result = celery_upload_images.delay(dream_id, encoded_files, positions)
         return result.id
     except Exception as e:
         logger.error(f"发送图片处理任务失败: {str(e)}")
@@ -219,7 +194,7 @@ def upload_images(dream_id: int, image_files: List[Dict], positions: List[int]) 
 def delete_images(dream_id: int, image_urls: List[Dict], username: str) -> str:
     """发送图片删除任务到Celery队列"""
     try:
-        result = delete_dream_images.delay(dream_id, image_urls, username)
+        result = celery_delete_images.delay(dream_id, image_urls, username)
         return result.id
     except Exception as e:
         logger.error(f"发送图片删除任务失败: {str(e)}")

@@ -42,7 +42,7 @@ class DreamImagesConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
-        # 将连接添加到通道组并接受连接
+        # 客户端连接到 WebSocket 端点，将连接添加到特定通道组：self.room_group_name
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
         

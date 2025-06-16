@@ -12,8 +12,9 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+import environ
 from config import (
-    DEBUG, SECRET_KEY, ALLOWED_HOSTS,
+    DEBUG, DJANGO_SECRET_KEY, ALLOWED_HOSTS,
     DATABASE, CACHES_CONFIG, REDIS_CONFIG,
     RABBITMQ_CONFIG, CELERY_CONFIG, ALIYUN_CONFIG,
     JWT_CONFIG
@@ -22,11 +23,12 @@ from config import (
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# 从config.py导入配置，环境变量加载已在config.py中处理
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = SECRET_KEY
+SECRET_KEY = DJANGO_SECRET_KEY
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = DEBUG

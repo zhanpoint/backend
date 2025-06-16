@@ -28,7 +28,7 @@ def send_image_update(dream_id, image_urls=None, status='completed', message=Non
         return False
         
     try:
-        # 获取通道层
+        # 获取 Django Channels 的通道层实例。通道层是 Channels 的核心组件，负责消息的路由和传递。
         channel_layer = get_channel_layer()
         if not channel_layer:
             return False
@@ -50,11 +50,13 @@ def send_image_update(dream_id, image_urls=None, status='completed', message=Non
         max_retries = getattr(settings, 'WEBSOCKET_MAX_RETRIES', 3)
         retry_delay = getattr(settings, 'WEBSOCKET_RETRY_DELAY', 1)
         
-        # 发送消息到通道组
+        # 发送消息到指定的通道组
         group_name = f'dream_images_{dream_id}'
         
         for attempt in range(max_retries):
             try:
+                # 消息通过 channel_layer.group_send 发送到通道组
+                # 由于 send_image_update 函数在同步环境（如 Celery 任务或视图函数）中调用，而 Channels 的通道层操作是异步的，所以需要这个转换器将异步函数转换为同步函数
                 async_to_sync(channel_layer.group_send)(group_name, message_data)
                 return True
             except Exception:

@@ -30,19 +30,14 @@ app.conf.task_default_queue = 'default'
 app.conf.task_default_exchange = 'default'
 app.conf.task_default_routing_key = 'default'
 
-# 6.设置默认队列
-app.conf.task_default_queue = 'default'
-app.conf.task_default_exchange = 'default'
-app.conf.task_default_routing_key = 'default'
-
 # 7.配置任务路由
 app.conf.task_routes = {
-    'dream.celery.tasks.image_tasks.process_and_upload_images': {
+    'dream.celery.tasks.image_tasks.celery_upload_images': {
         'queue': 'dream_image_processing',
         'exchange': 'dream_images',
         'routing_key': 'image_processing',
     },
-    'dream.celery.tasks.image_tasks.delete_dream_images': {
+    'dream.celery.tasks.image_tasks.celery_delete_images': {
         'queue': 'dream_image_processing',
         'exchange': 'dream_images',
         'routing_key': 'image_processing',
