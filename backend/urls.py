@@ -17,6 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.schemas import get_schema_view
+from django.conf import settings
+from django.conf.urls.static import static
 
 # API文档设置
 schema_view = get_schema_view(
@@ -36,3 +38,8 @@ urlpatterns = [
     # API认证路由
     path('api-auth/', include('rest_framework.urls')),  # DRF登录/登出视图
 ]
+
+# 仅在开发模式下提供静态和媒体文件
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

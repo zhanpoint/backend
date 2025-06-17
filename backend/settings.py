@@ -240,6 +240,18 @@ CHANNEL_LAYERS = {
     },
 }
 
-# Static files (CSS, JavaScript, Images)
+# 静态文件配置
 STATIC_URL = 'static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+# （可选）额外的静态文件目录，Django 会在这些目录中查找静态文件
+# STATICFILES_DIRS = [
+#     os.path.join(BASE_DIR, '/project_static'),
+# ]
+
+# 指向部署时（即运行 python manage.py collectstatic 命令时）Django 将所有静态文件（包括所有 app 的静态文件和 STATICFILES_DIRS 中的文件）收集到的目标目录。
+# STATIC_ROOT 只在生产环境中使用 collectstatic 命令时生效。在开发环境中，STATIC_URL 配合 STATICFILES_DIRS 和各个 App 内部的 static 文件夹来提供静态文件。而 MEDIA_URL 配合 MEDIA_ROOT 才能通过 runserver 提供媒体文件。
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles_collected')
+
+# Media files (User uploaded content)
+MEDIA_URL = 'media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
