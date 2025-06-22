@@ -14,7 +14,7 @@ from dream.serializers.dream_serializers import (
     DreamSerializer,
     DreamCreateSerializer,
 )
-from dream.celery.tasks.image_tasks import upload_images, delete_images
+from dream.tasks.image_tasks import upload_images, delete_images
 
 
 class DreamViewSet(viewsets.ModelViewSet):
@@ -87,8 +87,8 @@ class DreamViewSet(viewsets.ModelViewSet):
                 if tags:
                     self._process_tags(dream, tags, tag_type)
 
-            # 处理图片上传
-            self._process_image_uploads(dream, request)
+            # 只有当当前的数据库事务成功提交（即所有数据库操作都保存到数据库中，没有发生错误并回滚）之后，才执行Celery任务
+            transaction.on_commit(lambda: self._process_image_uploads(dream, request))
 
             # 序列化并返回完整的梦境数据
             dream.content = self._insert_images_to_content(dream)
@@ -105,7 +105,7 @@ class DreamViewSet(viewsets.ModelViewSet):
                     'websocket_url': f'/ws/dream-images/{dream.id}/',
                     'images': []  # 预留空图片列表，将通过WebSocket更新
                 }
-            
+
             return Response(response_data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
@@ -196,11 +196,13 @@ class DreamViewSet(viewsets.ModelViewSet):
             
             # 2. 异步删除不再使用的图片
             if delete_image_urls:
-                self._async_delete_images(dream.id, delete_image_urls, request.user.username)
+                # 使用 transaction.on_commit 确保在事务成功后才发送Celery任务
+                transaction.on_commit(lambda: self._async_delete_images(dream.id, delete_image_urls, request.user.username))
                 
             # 3. 异步处理新上传的图片
             if request.FILES:
-                self._process_image_uploads(dream, request)
+                # 使用 transaction.on_commit 确保在事务成功后才发送Celery任务
+                transaction.on_commit(lambda: self._process_image_uploads(dream, request))
                 
         except Exception as e:
             logger.error(f"处理图片变更失败: {str(e)}")

@@ -24,7 +24,7 @@ env = environ.Env(
 project_root = Path(__file__).resolve().parent
 env_path = project_root / '.env'
 
-# 加载.env文件
+# # 加载.env文件
 environ.Env.read_env(env_path)
 
 # Django基础配置
@@ -81,18 +81,32 @@ RABBITMQ_CONFIG = {
 
 # Celery配置
 CELERY_CONFIG = {
+    # 使用 RabbitMQ 作为消息代理（Broker），负责接收和分发任务消息。
     'broker_url': f"amqp://{RABBITMQ_CONFIG['user']}:{RABBITMQ_CONFIG['password']}@{RABBITMQ_CONFIG['host']}:{RABBITMQ_CONFIG['port']}/{RABBITMQ_CONFIG['vhost']}",
+    # 使用 Redis (db 1) 作为结果后端，用于存储任务的执行状态和返回值。
     'result_backend': f"redis://:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/1",
+    # 这个配置项明确指定了Celery worker需要加载的任务模块，这是一种良好的实践，可以避免autodiscover_tasks可能带来的不确定性。
+    'include': ['dream.tasks.image_tasks', 'dream.tasks.token_tasks'],
     'redis_max_connections': 10,
+    # 确保了任务和结果都使用JSON格式进行序列化，具有良好的通用性和可读性。
     'task_serializer': 'json',
     'result_serializer': 'json',
     'accept_content': ['json'],
+    # 与Django配置保持一致，确保定时任务和时间记录的准确性。
     'timezone': 'Asia/Shanghai',
     'enable_utc': True,
+    # 任务结果在Redis中会保存1小时，之后自动清除，有助于节省内存
     'task_result_expires': 3600,  # 1小时
+    # 只有在任务执行成功后，消息才会从队列中被"确认"（删除）。如果worker在执行任务时崩溃，该任务会被重新分发给另一个worker。
     'task_acks_late': True,
+    #  与上一条配合使用,即使worker进程被强制杀死，任务也会被拒绝并重新入队。
     'task_reject_on_worker_lost': True,
+    # Celery的worker_prefetch_multiplier默认值是4,如果第一个任务是长耗时任务，那么其它3个任务会闲置在worker的内存中等待，而此时其他空闲的worker也无法获取这些任务，导致任务处理的并行度下降，队列阻塞
+    # 设置为1对于长耗时任务是最佳实践，能确保任务被更均匀地分配给所有可用的worker。
+    'worker_prefetch_multiplier': 1,
+    
 }
+
 
 # 阿里云配置
 ALIYUN_CONFIG = {

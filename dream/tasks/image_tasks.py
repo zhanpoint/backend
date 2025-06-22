@@ -1,66 +1,26 @@
 import logging
-from PIL import Image
 import io
 import base64
 from dream.utils.oss import OSS
-from dream.models import DreamImage, Dream
-import multiprocessing
 from typing import List, Dict
 from django.db import transaction
-from dataclasses import dataclass
-from concurrent.futures import ProcessPoolExecutor
 from dream.websocket.utils.notifications import send_image_update
-import time
 from django.core.exceptions import ObjectDoesNotExist
 from celery import shared_task
 
 logger = logging.getLogger(__name__)
 
-# 进程池核心数，根据CPU数量自动设置
-CPU_COUNT = multiprocessing.cpu_count()
-PROCESS_COUNT = max(2, min(CPU_COUNT - 1, 8))  # 留一个核心给系统，最多使用8个核心
-
-
-@dataclass
-class ImageTask:
-    """图片任务数据类"""
-    data: bytes
-    filename: str
-    position: int
-    processed_data: bytes = None
-    image_url: str = None
-
-
-def process_image(image_data: bytes, filename: str, max_size: int = 1024 * 1024) -> bytes:
-    """处理单个图片（在进程池中执行）"""
-    try:
-        with Image.open(io.BytesIO(image_data)) as img:
-            # 转换RGBA到RGB
-            if img.mode == 'RGBA':
-                img = img.convert('RGB')
-
-            # 调整图片大小
-            current_size = len(image_data)
-            if current_size > max_size:
-                ratio = (max_size / current_size) ** 0.5
-                width, height = img.size
-                new_size = (int(width * ratio), int(height * ratio))
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-
-            # 保存图片
-            output = io.BytesIO()
-            quality = 85 if current_size <= max_size else int(85 * (max_size / current_size))
-            img.save(output, format='JPEG', quality=quality, optimize=True)
-            return output.getvalue()
-    except Exception as e:
-        logger.error(f"处理图片失败: {str(e)}")
-        raise
-
 
 # 任务执行
-@shared_task(bind=True, max_retries=5, retry_backoff=True, retry_backoff_max=600, time_limit=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def celery_upload_images(self, dream_id: int, encoded_files: List[Dict], positions: List[int]) -> List[str]:
-    """处理并上传多个图片的Celery任务"""
+    """
+    直接上传多个图片的Celery任务，不进行处理。
+    此任务被设计为幂等的，以确保在重试时不会创建重复数据。
+    """
+    # 在函数内部导入 Django 模型
+    from dream.models import DreamImage, Dream
+
     # 参数验证
     if not isinstance(dream_id, int) or dream_id <= 0 or not encoded_files or len(encoded_files) != len(positions):
         send_image_update(dream_id, [], status='failed', message='无效的参数')
@@ -69,7 +29,7 @@ def celery_upload_images(self, dream_id: int, encoded_files: List[Dict], positio
     try:
         # 获取梦境记录
         dream = Dream.objects.get(id=dream_id)
-        
+
         # 创建OSS实例并确保存储桶存在
         oss = OSS(username=dream.user.username)
         oss.ensure_bucket_exists()
@@ -79,59 +39,60 @@ def celery_upload_images(self, dream_id: int, encoded_files: List[Dict], positio
                            for file, position in zip(encoded_files, positions)]
         send_image_update(dream_id, [], status='processing')
 
-        # 并行处理图片
-        process_count = min(PROCESS_COUNT, len(image_data_list))
-        processed_images = []
-        
-        with ProcessPoolExecutor(max_workers=process_count) as executor:
-            futures = [executor.submit(process_image, data, filename) for data, filename, _ in image_data_list]
-            processed_data_list = [future.result() for future in futures]
-
-        # 上传处理后的图片
-        for i, processed_data in enumerate(processed_data_list):
-            _, filename, position = image_data_list[i]
-            
-            # 准备上传
-            unique_filename = f"{int(time.time())}_{filename}"
-            file_obj = io.BytesIO(processed_data)
+        # 直接上传图片
+        uploaded_images = []
+        for image_data, filename, position in image_data_list:
+            # 准备上传 - 使用确定性文件名以保证幂等性
+            # 格式: {dream_id}_{position}_{original_filename}
+            unique_filename = f"{dream_id}_{position}_{filename}"
+            file_obj = io.BytesIO(image_data)
             file_obj.name = unique_filename
             
-            # 上传到OSS
+            # 上传到OSS（如果文件已存在，会被覆盖，这是幂等行为）
             image_url = oss.upload_file(file_obj)
-            processed_images.append((image_url, position))
+            uploaded_images.append((image_url, position))
 
         # 创建数据库记录并发送通知
-        created_images = []
+        created_images_info = []
         with transaction.atomic():
-            for url, position in processed_images:
-                image = DreamImage.objects.create(
+            for url, position in uploaded_images:
+                # 使用 get_or_create 保证幂等性
+                # 如果记录已存在，则不会创建新的，避免了重复
+                # 注意: 这假设 (dream, position) 组合在数据库中是唯一的
+                image, created = DreamImage.objects.get_or_create(
                     dream=dream,
-                    image_url=url,
-                    position=position
+                    position=position,
+                    defaults={'image_url': url}
                 )
-                created_images.append({
+                
+                # 如果不是新创建的，可能URL因某种原因需要更新
+                if not created and image.image_url != url:
+                    image.image_url = url
+                    image.save()
+
+                created_images_info.append({
                     "id": image.id,
-                    "url": url,
-                    "position": position
+                    "url": image.image_url,
+                    "position": image.position
                 })
 
         # 发送完成通知
-        send_image_update(dream_id, created_images, status='completed')
+        send_image_update(dream_id, created_images_info, status='completed')
         
         # 返回所有图片URL
-        return [url for url, _ in processed_images]
+        return [url for url, _ in uploaded_images]
 
-    except ObjectDoesNotExist as e:
-        send_image_update(dream_id, [], status='failed', message=f'无法找到梦境记录(ID={dream_id})')
-        raise self.retry(exc=e, countdown=60)
     except Exception as e:
+        # 捕获上传过程中的其他异常（如网络问题），并进行重试
+        logger.error(f"处理梦境(ID={dream_id})的图片时发生未知错误: {e}")
         send_image_update(dream_id, [], status='failed', message=str(e))
-        raise self.retry(exc=e, countdown=60)
+        raise self.retry(exc=e)
 
 
 @shared_task(bind=True, max_retries=5, retry_backoff=True, retry_backoff_max=600, time_limit=300)
 def celery_delete_images(self, dream_id: int, image_urls: List[Dict], username: str) -> List[bool]:
     """删除梦境相关的所有图片"""
+    
     if not image_urls:
         send_image_update(dream_id, [], status='delete_completed', message='没有图片需要删除')
         return []
