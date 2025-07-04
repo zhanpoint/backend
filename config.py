@@ -15,8 +15,13 @@ env = environ.Env(
     REDIS_PORT=(int, 6379),
     REDIS_DB=(int, 0),
     RABBITMQ_PORT=(int, 5672),
-    JWT_ACCESS_TOKEN_LIFETIME_MINUTES=(int, 60),
-    JWT_REFRESH_TOKEN_LIFETIME_DAYS=(int, 7),
+    JWT_ACCESS_TOKEN_LIFETIME_MINUTES=(int, 1440),  # 24小时
+    JWT_REFRESH_TOKEN_LIFETIME_DAYS=(int, 30),      # 30天
+    EMAIL_PORT=(int, 465),
+    EMAIL_USE_SSL=(bool, True),
+    EMAIL_USE_TLS=(bool, False),
+    SMS_SERVICE_ENABLED=(bool, False),
+    EMAIL_SERVICE_ENABLED=(bool, True),
 )
 
 # 读取项目最外层的.env文件
@@ -86,7 +91,7 @@ CELERY_CONFIG = {
     # 使用 Redis (db 1) 作为结果后端，用于存储任务的执行状态和返回值。
     'result_backend': f"redis://:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/1",
     # 这个配置项明确指定了Celery worker需要加载的任务模块，这是一种良好的实践，可以避免autodiscover_tasks可能带来的不确定性。
-    'include': ['dream.tasks.image_tasks', 'dream.tasks.token_tasks'],
+    'include': ['dream.tasks.image_tasks', 'dream.tasks.token_tasks', 'dream.tasks.email_tasks'],
     'redis_max_connections': 10,
     # 确保了任务和结果都使用JSON格式进行序列化，具有良好的通用性和可读性。
     'task_serializer': 'json',
@@ -116,10 +121,36 @@ ALIYUN_CONFIG = {
     'sts_role_oss_arn': env('ALIYUN_STS_ROLE_OSS_ARN', default=None),
     'sts_role_sms_arn': env('ALIYUN_STS_ROLE_SMS_ARN', default=None),
     'region_id': env('ALIYUN_REGION_ID', default='cn-wuhan-lr'),
-    'sms_sign_name': env('ALIYUN_SMS_SIGN1', default=None),
+    'sms_sign_name': env('ALIYUN_SMS_SIGN', default=None),
     'sms_template_code_register': env('ALIYUN_SMS_TEMPLATE_REGISTER', default=None),
     'sms_template_code_login': env('ALIYUN_SMS_TEMPLATE_LOGIN', default=None),
     'sms_template_code_resetpassword': env('ALIYUN_SMS_TEMPLATE_RESETPASSWORD', default=None),
+}
+
+# 功能开关配置
+FEATURE_FLAGS = {
+    # 短信服务开关 - 设置为False时禁用短信功能
+    'SMS_SERVICE_ENABLED': env('SMS_SERVICE_ENABLED', default=False),
+    'EMAIL_SERVICE_ENABLED': env('EMAIL_SERVICE_ENABLED', default=True),
+}
+
+# 邮件配置
+EMAIL_CONFIG = {
+    'backend': 'django.core.mail.backends.smtp.EmailBackend',
+    # 阿里云邮件推送SMTP服务器
+    'host': env('EMAIL_HOST', default='smtpdm.aliyun.com'),
+    # 阿里云邮件推送SMTP端口，465 是 SSL 加密连接的标准端口
+    'port': env('EMAIL_PORT', default=465),
+    # 使用SSL加密连接
+    'use_ssl': env('EMAIL_USE_SSL', default=True),
+    # 使用TLS，默认不使用
+    'use_tls': env('EMAIL_USE_TLS', default=False),
+    # 阿里云邮件推送发信地址，如 （noreply@your-domain.com）。
+    'username': env('EMAIL_HOST_USER', default=None),
+    # 阿里云邮件推送SMTP密码
+    'password': env('EMAIL_HOST_PASSWORD', default=None),
+    # 默认发信地址，用于发送邮件时显示的发件人信息
+    'default_from_email': env('DEFAULT_FROM_EMAIL', default=None),
 }
 
 # JWT配置

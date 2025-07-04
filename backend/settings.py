@@ -17,8 +17,8 @@ from kombu import Queue, Exchange
 from config import (
     DEBUG, DJANGO_SECRET_KEY, ALLOWED_HOSTS,
     DATABASE, CACHES_CONFIG, REDIS_CONFIG,
-    RABBITMQ_CONFIG, CELERY_CONFIG, ALIYUN_CONFIG,
-    JWT_CONFIG
+    RABBITMQ_CONFIG, CELERY_CONFIG, 
+    JWT_CONFIG, EMAIL_CONFIG
 )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -213,6 +213,8 @@ CELERY_BROKER_URL = CELERY_CONFIG['broker_url']
 # Redis结果后端配置(带密码认证)
 CELERY_RESULT_BACKEND = CELERY_CONFIG['result_backend']
 CELERY_REDIS_MAX_CONNECTIONS = CELERY_CONFIG['redis_max_connections']
+# Celery 启动时会主动导入这些模块，从而使已任务注册生效。
+CELERY_INCLUDE = CELERY_CONFIG['include']
 
 # Celery序列化设置
 CELERY_ACCEPT_CONTENT = CELERY_CONFIG['accept_content']
@@ -284,3 +286,14 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles_collected')
 # Media files (User uploaded content)
 MEDIA_URL = 'media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Email配置
+EMAIL_BACKEND = EMAIL_CONFIG['backend']
+EMAIL_HOST = EMAIL_CONFIG['host']
+EMAIL_PORT = EMAIL_CONFIG['port']
+EMAIL_USE_SSL = EMAIL_CONFIG['use_ssl']
+EMAIL_USE_TLS = EMAIL_CONFIG['use_tls']
+EMAIL_HOST_USER = EMAIL_CONFIG['username']
+EMAIL_HOST_PASSWORD = EMAIL_CONFIG['password']
+# 如果未明确设置，则默认发件人与认证用户相同，以符合阿里云邮件服务要求
+DEFAULT_FROM_EMAIL = EMAIL_CONFIG['default_from_email'] or EMAIL_HOST_USER

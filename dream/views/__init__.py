@@ -1,10 +1,17 @@
 # 导出所有视图
-from .sms import SendVerificationCodeAPIView
-from .user import (
-    UserRegistrationWithCodeAPIView,
-    UserLoginAPIView,
-    PhoneLoginWithCodeAPIView,
-    UserLogoutAPIView,
-    UserProfileAPIView
-)
 from .dream import DreamViewSet
+from .email import EmailVerificationCodeAPIView
+from .oss import upload_image, delete_image
+from .sms import VerificationCodeAPIView
+from .user import UserViewSet, AuthSessionAPIView, UserPasswordAPIView
+
+__all__ = [
+    'DreamViewSet',
+    'EmailVerificationCodeAPIView',
+    'upload_image',
+    'delete_image',
+    'VerificationCodeAPIView',
+    'UserViewSet',
+    'AuthSessionAPIView',
+    'UserPasswordAPIView',
+]

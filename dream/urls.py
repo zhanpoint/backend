@@ -4,14 +4,13 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from rest_framework.routers import DefaultRouter
-from .views.sms import SendVerificationCodeAPIView
+from .views.sms import VerificationCodeAPIView
+from .views.email import EmailVerificationCodeAPIView
 from .views.user import (
-    UserRegistrationWithCodeAPIView,  # 手机号验证码注册API
-    UserLoginAPIView,  # 用户名密码登录API
-    PhoneLoginWithCodeAPIView,  # 手机号验证码登录API
-    UserLogoutAPIView,  # 用户登出API
-    UserProfileAPIView,  # 用户资料API
-    ResetPasswordAPIView,  # 密码重置API
+    UserViewSet,  # 用户资源ViewSet
+    AuthSessionAPIView,  # 认证会话API
+    UserPasswordAPIView,  # 用户密码API
+    FeatureFlagsAPIView,  # 功能开关状态API
 )
 from .views import oss
 from .views.dream import DreamViewSet
@@ -19,28 +18,30 @@ from .views.dream import DreamViewSet
 # 创建路由器并注册ViewSet
 router = DefaultRouter()
 router.register(r'dreams', DreamViewSet, basename='dream')
+router.register(r'users', UserViewSet, basename='user')
 
 # 设置API URL前缀
 api_urlpatterns = [
-    # 用户认证相关API
-    path('auth/register-with-code/', UserRegistrationWithCodeAPIView.as_view(), name='register'),
-    path('auth/login/', UserLoginAPIView.as_view(), name='login'),
-    path('auth/login-with-code/', PhoneLoginWithCodeAPIView.as_view(), name='login-with-code'),
-    path('auth/logout/', UserLogoutAPIView.as_view(), name='logout'),
-    path('auth/profile/', UserProfileAPIView.as_view(), name='profile'),
-    path('auth/reset-password/', ResetPasswordAPIView.as_view(), name='reset-password'),
-
+    # 认证会话API - 统一的登录/登出接口
+    path('auth/sessions/', AuthSessionAPIView.as_view(), name='auth-sessions'),
+    
+    # 用户密码管理API
+    path('users/password/', UserPasswordAPIView.as_view(), name='user-password'),
+    
+    # 功能开关状态API
+    path('system/features/', FeatureFlagsAPIView.as_view(), name='feature-flags'),
     
     # JWT令牌API
-    path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/tokens/', TokenObtainPairView.as_view(), name='token-obtain'),
+    path('auth/tokens/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     
-    # 短信验证码API
-    path('sms/send-verification-code/', SendVerificationCodeAPIView.as_view(), name='send-code'),
+    # 验证码API
+    path('verifications/sms/', VerificationCodeAPIView.as_view(), name='sms-verification'),
+    path('verifications/email/', EmailVerificationCodeAPIView.as_view(), name='email-verification'),
 
     # OSS对象存储API
-    path('image/upload/', oss.upload_image, name='upload-image'),
-    path('image/delete/', oss.delete_image, name='delete-image'),
+    path('uploads/images/', oss.upload_image, name='upload-image'),
+    path('uploads/images/<str:image_id>/', oss.delete_image, name='delete-image'),
     
     # 包含ViewSet路由
     path('', include(router.urls)),

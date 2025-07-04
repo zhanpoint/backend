@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DreamLog - 登录验证码</title>
+    <style>
+        /* Basic styles */
+        body {
+            font-family: 'Arial', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            background-color: #4a00e0;
+            color: #ffffff;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+        }
+
+        .content {
+            padding: 30px 40px;
+            color: #333;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+
+        .code-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .code {
+            font-size: 36px;
+            font-weight: bold;
+            color: #4a00e0;
+            letter-spacing: 8px;
+            padding: 15px 25px;
+            background-color: #f0e6ff;
+            border-radius: 5px;
+            display: inline-block;
+        }
+
+        .footer {
+            background-color: #f9f9f9;
+            padding: 20px 40px;
+            text-align: center;
+            color: #777;
+            font-size: 14px;
+            border-top: 1px solid #eeeeee;
+        }
+
+        .footer a {
+            color: #4a00e0;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>欢迎回来</h1>
+        </div>
+        <div class="content">
+            <p>亲爱的用户：</p>
+            <p>您好！您正在登录DreamLog。您的验证码是：</p>
+            <div class="code-container">
+                <span class="code">{{ code }}</span>
+            </div>
+            <p>此验证码将在 <strong>5 分钟</strong> 内有效。请勿将此验证码泄露给他人。</p>
+            <p>如果您没有请求此验证码，请忽略这封邮件。</p>
+            <br>
+            <p>祝您探索愉快！</p>
+            <p><strong>DreamLog团队</strong></p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2025 DreamLog. All Rights Reserved.</p>
+            <p>如果您需要帮助，请联系我们的 <a href="#">支持团队</a>。</p>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -35,12 +35,6 @@ class OSS:
             self.sts_endpoint = 'sts.aliyuncs.com'
             self.bucket_name = self._generate_bucket_name(self.username)
 
-            # 设置代理
-            self.proxies = {
-                'http': 'http://127.0.0.1:7890',
-                'https': 'http://127.0.0.1:7890'
-            }
-
             # 创建服务连接
             self.auth = oss2.Auth(self.access_key_id, self.access_key_secret)
             self.service = oss2.Service(self.auth, self.endpoint)  # 使用处理后的endpoint
@@ -119,7 +113,7 @@ class OSS:
             endpoint = str(self.endpoint)
             bucket_name = str(self.bucket_name)
 
-            bucket = oss2.Bucket(self.auth, endpoint, bucket_name, proxies=self.proxies)
+            bucket = oss2.Bucket(self.auth, endpoint, bucket_name)
 
             try:
                 bucket.get_bucket_info()
@@ -153,7 +147,7 @@ class OSS:
                 sts_token['security_token']
 
             )
-            bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name, proxies=self.proxies)
+            bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
 
             # 生成文件路径
             file_ext = file_obj.name.split('.')[-1]  # 文件类型后缀
@@ -220,7 +214,7 @@ class OSS:
             )
 
             # 创建并返回bucket实例
-            bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name, proxies=self.proxies)
+            bucket = oss2.Bucket(auth, self.endpoint, self.bucket_name)
             logger.debug(f"成功创建Bucket实例: {self.bucket_name}")
             return bucket
 

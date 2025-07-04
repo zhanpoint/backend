@@ -1,35 +1,76 @@
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import login, logout
+from django.core.cache import cache
+from dream.models import User
 import logging
 from dream.serializers.user_serializers import (
     UserSerializer,
     UserLoginSerializer,
-    UserRegistrationWithCodeSerializer,
-    PhoneVerifyCodeLoginSerializer,
-    ResetPasswordSerializer
+    UserRegistrationSerializer,
+    PhoneLoginSerializer,
+    EmailLoginSerializer,
+    PasswordResetSerializer,
 )
 from dream.utils.sms import SMSService
+from dream.utils.email import EmailService
+from config import FEATURE_FLAGS
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
 
 
-# 用户注册API
-class UserRegistrationWithCodeAPIView(APIView):
+class UserViewSet(viewsets.ModelViewSet):
     """
-    带短信验证码的用户注册API
+    用户资源ViewSet - 处理用户CRUD操作
     """
-    permission_classes = [AllowAny]
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        # 1. 验证请求数据
-        serializer = UserRegistrationWithCodeSerializer(data=request.data)
+    def get_permissions(self):
+        """
+        根据不同的操作返回不同的权限类
+        - create（注册）: 允许匿名访问，注册操作应该是公开的，不需要认证。
+        - 其他操作: 需要认证
+        """
+        if self.action == 'create':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        """
+        只返回当前用户的数据
+        """
+        return [self.request.user] if self.request.user.is_authenticated else []
+
+    def create(self, request, *args, **kwargs):
+        """
+        用户注册 - 支持手机号和邮箱注册
+        POST /api/users/
+        """
+        # 根据请求数据中是否有phone_number或email来判断注册方式
+        phone_number = request.data.get('phone_number')
+        email = request.data.get('email')
+        code = request.data.get('code')
+
+        if phone_number:
+            return self._register_with_phone(request)
+        elif email:
+            return self._register_with_email(request)
+        else:
+            return Response({
+                "code": 400,
+                "message": "注册失败",
+                "errors": {"detail": ["请提供手机号或邮箱地址"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def _register_with_phone(self, request):
+        """手机号验证码注册"""
+        serializer = UserRegistrationSerializer(data=request.data)
         if not serializer.is_valid():
-            # 记录验证失败详情
             logger.warning(f"用户注册数据验证失败: {serializer.errors}")
             return Response({
                 "code": 400,
@@ -37,7 +78,7 @@ class UserRegistrationWithCodeAPIView(APIView):
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. 验证短信验证码
+        # 验证短信验证码
         phone = serializer.validated_data['phone_number']
         code = serializer.validated_data['code']
 
@@ -51,21 +92,14 @@ class UserRegistrationWithCodeAPIView(APIView):
                 "errors": {"code": ["验证码错误或已过期"]}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3. 创建用户
         try:
             user = serializer.save()
-            # 自动登录
             login(request, user)
-
-            # 生成JWT令牌
             refresh = RefreshToken.for_user(user)
-
-            # 返回用户数据
             user_data = UserSerializer(user).data
 
             logger.info(f"用户注册成功, 用户名: {user.username}, 手机号: {phone}")
 
-            # 4. 返回成功响应（包含token）
             return Response({
                 "code": 201,
                 "message": "注册成功",
@@ -75,76 +109,216 @@ class UserRegistrationWithCodeAPIView(APIView):
             }, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            # 处理创建用户过程中的异常
             logger.exception(f"用户注册过程中发生异常: {str(e)}")
+            return self._handle_registration_error(e)
 
-            # 根据异常类型返回不同的错误信息
-            error_message = "服务器错误，注册失败"
-            error_detail = str(e)
-
-            # 检查是否是唯一约束错误
-            if "unique constraint" in error_detail.lower() or "duplicate" in error_detail.lower():
-                if "username" in error_detail.lower():
-                    return Response({
-                        "code": 400,
-                        "message": "注册失败",
-                        "errors": {"username": ["该用户名已被注册"]}
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                elif "phone_number" in error_detail.lower():
-                    return Response({
-                        "code": 400,
-                        "message": "注册失败",
-                        "errors": {"phone_number": ["该手机号已被注册"]}
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-            # 其他未知错误
+    def _register_with_email(self, request):
+        """邮箱验证码注册"""
+        serializer = UserRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            logger.warning(f"邮箱注册数据验证失败: {serializer.errors}")
             return Response({
-                "code": 500,
-                "message": error_message,
-                "errors": {"detail": error_detail}
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                "code": 400,
+                "message": "注册失败",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 验证邮箱验证码
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+
+        logger.info(f"验证用户注册邮箱验证码, 邮箱: {email}")
+
+        if not EmailService.verify_code(email, code):
+            logger.warning(f"用户注册验证码验证失败, 邮箱: {email}")
+            return Response({
+                "code": 400,
+                "message": "验证码错误或已过期",
+                "errors": {"code": ["验证码错误或已过期"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = serializer.save()
+            login(request, user)
+            refresh = RefreshToken.for_user(user)
+            user_data = UserSerializer(user).data
+
+            logger.info(f"用户注册成功, 用户名: {user.username}, 邮箱: {email}")
+
+            return Response({
+                "code": 201,
+                "message": "注册成功",
+                "data": user_data,
+                "access": str(refresh.access_token),
+                "refresh": str(refresh)
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.exception(f"邮箱注册过程中发生异常: {str(e)}")
+            return self._handle_registration_error(e)
+
+    def _handle_registration_error(self, exception):
+        """处理注册错误"""
+        error_detail = str(exception)
+        logger.error(f"注册错误详情: {error_detail}")  # 仅在日志中记录详细错误
+        
+        if "unique constraint" in error_detail.lower() or "duplicate" in error_detail.lower():
+            if "username" in error_detail.lower():
+                return Response({
+                    "code": 400,
+                    "message": "注册失败",
+                    "errors": {"username": ["该用户名已被注册"]}
+                }, status=status.HTTP_400_BAD_REQUEST)
+            elif "phone_number" in error_detail.lower():
+                return Response({
+                    "code": 400,
+                    "message": "注册失败",
+                    "errors": {"phone_number": ["该手机号已被注册"]}
+                }, status=status.HTTP_400_BAD_REQUEST)
+        elif "email" in error_detail.lower():
+            return Response({
+                "code": 400,
+                "message": "注册失败",
+                "errors": {"email": ["该邮箱已被注册"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "code": 500,
+        "message": "服务器错误，注册失败",
+        "errors": {"detail": ["服务器内部错误，请稍后重试"]}  # 不暴露具体错误信息
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def retrieve(self, request, *args, **kwargs):
+        """
+        获取当前用户信息
+        GET /api/users/{id}/
+        """
+        user_data = UserSerializer(request.user).data
+        return Response({
+            "code": 200,
+            "message": "获取用户信息成功",
+            "data": user_data
+        })
+
+    def update(self, request, *args, **kwargs):
+        """
+        更新用户信息
+        PUT /api/users/{id}/
+        """
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            logger.info(f"用户信息更新成功, 用户ID: {request.user.id}")
+            return Response({
+                "code": 200,
+                "message": "用户信息更新成功",
+                "data": serializer.data
+            })
+        
+        logger.warning(f"用户信息更新失败: {serializer.errors}")
+        return Response({
+            "code": 400,
+            "message": "用户信息更新失败",
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 
-# 用户名密码登录API
-class UserLoginAPIView(APIView):
+class AuthSessionAPIView(APIView):
     """
-    用户登录API
+    认证会话API - 统一处理登录和登出
     """
-    permission_classes = [AllowAny]
+    
+    def get_permissions(self):
+        """
+        POST（登录）允许匿名，DELETE（登出）需要认证
+        """
+        if self.request.method == 'POST':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def check_login_attempts(self, identifier, max_attempts=5, lockout_time=900):
+        """
+        检查登录尝试次数
+        
+        Args:
+            identifier: 用户标识（用户名、手机号或邮箱）
+            max_attempts: 最大尝试次数，默认5次
+            lockout_time: 锁定时间（秒），默认15分钟
+            
+        Returns:
+            tuple: (是否允许登录, 剩余锁定时间)
+        """
+        attempts_key = f"login_attempts:{identifier}"
+        lockout_key = f"login_lockout:{identifier}"
+        
+        # 检查是否被锁定
+        lockout_ttl = cache.ttl(lockout_key)
+        if lockout_ttl > 0:
+            return False, lockout_ttl
+        
+        # 获取当前尝试次数
+        attempts = cache.get(attempts_key, 0)
+        
+        if attempts >= max_attempts:
+            # 设置锁定
+            cache.set(lockout_key, True, timeout=lockout_time)
+            cache.delete(attempts_key)
+            return False, lockout_time
+        
+        return True, 0
+    
+    def increment_login_attempts(self, identifier):
+        """
+        增加登录尝试次数
+        """
+        attempts_key = f"login_attempts:{identifier}"
+        attempts = cache.get(attempts_key, 0)
+        cache.set(attempts_key, attempts + 1, timeout=3600)  # 1小时后重置计数
+    
+    def reset_login_attempts(self, identifier):
+        """
+        重置登录尝试次数（登录成功后调用）
+        """
+        attempts_key = f"login_attempts:{identifier}"
+        lockout_key = f"login_lockout:{identifier}"
+        cache.delete(attempts_key)
+        cache.delete(lockout_key)
 
     def post(self, request):
         """
-        处理POST请求，验证用户并登录
-        
-        请求格式:
-        {
-            "username": "user123", (或手机号)
-            "password": "SecurePass123"
-        }
-        
-        成功响应:
-        {
-            "code": 200,
-            "message": "登录成功",
-            "data": {
-                "id": 1,
-                "username": "user123",
-                "phone_number": "13812345678",
-                "date_joined": "2023-08-01T12:00:00Z",
-                "last_login": "2023-08-01T15:30:00Z"
-            },
-            "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-            "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-        }
+        用户登录 - 支持用户名密码、手机验证码、邮箱验证码登录
+        POST /api/auth/sessions/
         """
+        # 根据请求参数判断登录方式
+        if 'phone_number' in request.data and 'code' in request.data:
+            return self._login_with_phone_code(request)
+        elif 'email' in request.data and 'code' in request.data:
+            return self._login_with_email_code(request)
+        else:
+            return self._login_with_password(request)
+
+    def _login_with_password(self, request):
+        """用户名密码登录"""
+        username = request.data.get('username', '')
+        
+        # 检查登录尝试次数
+        allowed, lockout_time = self.check_login_attempts(username)
+        if not allowed:
+            logger.warning(f"用户登录被锁定: {username}, 剩余锁定时间: {lockout_time}秒")
+            return Response({
+                "code": 429,
+                "message": f"登录失败次数过多，请{lockout_time}秒后再试",
+                "errors": {"username": [f"账户已被锁定，请{lockout_time}秒后再试"]}
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
         serializer = UserLoginSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             user = serializer.validated_data['user']
             login(request, user)
-
-            # 生成JWT令牌
             refresh = RefreshToken.for_user(user)
 
+            # 登录成功，重置尝试次数
+            self.reset_login_attempts(username)
             logger.info(f"用户登录成功, 用户名: {user.username}")
 
             return Response({
@@ -155,6 +329,8 @@ class UserLoginAPIView(APIView):
                 "refresh": str(refresh)
             })
 
+        # 登录失败，增加尝试次数
+        self.increment_login_attempts(username)
         logger.warning(f"用户登录失败: {serializer.errors}")
 
         return Response({
@@ -163,68 +339,67 @@ class UserLoginAPIView(APIView):
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
-# 手机号验证码登录API
-class PhoneLoginWithCodeAPIView(APIView):
-    """
-    手机号验证码登录API
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        """
-        处理POST请求，验证手机号验证码并登录
-
-        请求格式:
-        {
-            "phone_number": "13812345678",
-            "code": "123456"
-        }
-
-        成功响应:
-        {
-            "code": 200,
-            "message": "登录成功",
-            "data": {
-                "id": 1,
-                "username": "user123",
-                "phone_number": "13812345678",
-                "date_joined": "2023-08-01T12:00:00Z",
-                "last_login": "2023-08-01T15:30:00Z"
-            },
-            "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-            "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-        }
-        """
-        serializer = PhoneVerifyCodeLoginSerializer(data=request.data)
+    def _login_with_phone_code(self, request):
+        """手机验证码登录"""
+        serializer = PhoneLoginSerializer(data=request.data)
         if not serializer.is_valid():
-            logger.warning(f"手机号验证码登录验证失败: {serializer.errors}")
             return Response({
                 "code": 400,
                 "message": "登录失败",
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 验证验证码
-        phone = serializer.validated_data['phone_number']
+        phone_number = serializer.validated_data['phone_number']
         code = serializer.validated_data['code']
 
-        if not SMSService.verify_code(phone, code):
-            logger.warning(f"手机号 {phone} 验证码验证失败")
+        if not SMSService.verify_code(phone_number, code):
+            logger.warning(f"手机验证码登录失败, 手机号: {phone_number}")
             return Response({
                 "code": 400,
                 "message": "验证码错误或已过期",
                 "errors": {"code": ["验证码错误或已过期"]}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 登录用户
         user = serializer.validated_data['user']
         login(request, user)
+        refresh = RefreshToken.for_user(user)
+        
+        logger.info(f"手机验证码登录成功, 用户名: {user.username}")
+        
+        return Response({
+            "code": 200,
+            "message": "登录成功",
+            "data": UserSerializer(user).data,
+            "access": str(refresh.access_token),
+            "refresh": str(refresh)
+        })
 
-        # 生成JWT令牌
+    def _login_with_email_code(self, request):
+        """邮箱验证码登录"""
+        serializer = EmailLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "登录失败",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+
+        if not EmailService.verify_code(email, code):
+            logger.warning(f"邮箱验证码登录失败, 邮箱: {email}")
+            return Response({
+                "code": 400,
+                "message": "验证码错误或已过期",
+                "errors": {"code": ["验证码错误或已过期"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        user = serializer.validated_data['user']
+        login(request, user)
         refresh = RefreshToken.for_user(user)
 
-        logger.info(f"用户通过手机验证码登录成功, 手机号: {phone}")
+        logger.info(f"邮箱验证码登录成功, 用户名: {user.username}")
 
         return Response({
             "code": 200,
@@ -233,143 +408,70 @@ class PhoneLoginWithCodeAPIView(APIView):
             "access": str(refresh.access_token),
             "refresh": str(refresh)
         })
-    # 用户登出API
 
-
-# 用户登出API
-class UserLogoutAPIView(APIView):
-    """
-    用户登出API
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
+    def delete(self, request):
         """
-        处理POST请求，登出用户并使JWT令牌立即失效
-        
-        请求格式(可选):
-        {
-            "refresh": "用户的refresh token"
-        }
-        
-        成功响应:
-        {
-            "code": 200,
-            "message": "登出成功"
-        }
+        用户登出
+        DELETE /api/auth/sessions/
         """
         try:
-            # 获取请求中的refresh token
             refresh_token = request.data.get('refresh')
-
-            # 如果请求中包含refresh token，将其加入黑名单
             if refresh_token:
-                # 创建RefreshToken对象
                 token = RefreshToken(refresh_token)
-                # 将token加入黑名单
                 token.blacklist()
-                logger.info(f"用户 {request.user.username} 的refresh token已加入黑名单")
-
-            else:
-                # 尝试从请求的Authorization头获取access token
-                auth_header = request.headers.get('Authorization', '')
-                if auth_header.startswith('Bearer '):
-                    access_token = auth_header.split(' ')[1]
-
-                    # 通过解码access token获取user_id
-                    # 注意：这不会将access token加入黑名单，但可以记录该用户所有token已失效
-                    logger.info(f"用户 {request.user.username} 的access token已记录为失效")
-
-            # 记录用户退出
-            logger.info(f"用户 {request.user.username} 退出登录")
-
-            # 调用Django的登出方法清除session
+            
             logout(request)
+            logger.info(f"用户登出成功, 用户ID: {request.user.id}")
 
             return Response({
                 "code": 200,
-                "message": "退出成功，令牌已失效"
+                "message": "登出成功"
             })
-
         except Exception as e:
-            logger.error(f"退出登录过程中出错: {str(e)}")
-            # 即使出错，也要尝试登出
-            logout(request)
-
+            logger.exception(f"用户登出过程中发生异常: {str(e)}")
             return Response({
-                "code": 200,
-                "message": "退出成功，但令牌失效处理可能不完整"
-            })
+                "code": 500,
+                "message": "登出失败",
+                "errors": {"detail": ["服务器内部错误，请稍后重试"]}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# 用户个人资料API
-class UserProfileAPIView(APIView):
+class UserPasswordAPIView(APIView):
     """
-    用户个人资料API
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        """
-        获取当前登录用户的个人资料
-        
-        成功响应:
-        {
-            "code": 200,
-            "data": {
-                "id": 1,
-                "username": "user123",
-                "phone_number": "13812345678",
-                "date_joined": "2023-08-01T12:00:00Z",
-                "last_login": "2023-08-01T15:30:00Z"
-            }
-        }
-        """
-        serializer = UserSerializer(request.user)
-        return Response({
-            "code": 200,
-            "data": serializer.data
-        })
-
-
-class ResetPasswordAPIView(APIView):
-    """
-    密码重置API
+    用户密码管理API
     """
     permission_classes = [AllowAny]
 
-    def post(self, request):
+    def put(self, request):
         """
-        处理POST请求，重置用户密码
-        
-        请求格式:
-        {
-            "phone": "13812345678",
-            "code": "123456",
-            "new_password": "newpass123"
-        }
-        
-        成功响应:
-        {
-            "code": 200,
-            "message": "密码重置成功"
-        }
+        重置密码 - 支持手机号和邮箱重置
+        PUT /api/users/password/
         """
-        # 1. 验证请求数据
-        serializer = ResetPasswordSerializer(data=request.data)
+        # 根据请求数据判断重置方式
+        if 'phone' in request.data:
+            return self._reset_password_with_phone(request)
+        elif 'email' in request.data:
+            return self._reset_password_with_email(request)
+        else:
+            return Response({
+                "code": 400,
+                "message": "重置失败",
+                "errors": {"detail": ["请提供手机号或邮箱地址"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def _reset_password_with_phone(self, request):
+        """手机号重置密码"""
+        serializer = PasswordResetSerializer(data=request.data)
         if not serializer.is_valid():
-            logger.warning(f"密码重置数据验证失败: {serializer.errors}")
             return Response({
                 "code": 400,
                 "message": "重置失败",
                 "errors": serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 2. 验证短信验证码
         phone = serializer.validated_data['phone']
         code = serializer.validated_data['code']
-
-        logger.info(f"验证密码重置短信验证码, 手机号: {phone}")
+        new_password = serializer.validated_data['newPassword']
 
         if not SMSService.verify_code(phone, code):
             logger.warning(f"密码重置验证码验证失败, 手机号: {phone}")
@@ -379,22 +481,106 @@ class ResetPasswordAPIView(APIView):
                 "errors": {"code": ["验证码错误或已过期"]}
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3. 更新用户密码
         try:
-            user = serializer.user
-            user.set_password(serializer.validated_data['newPassword'])
+            user = User.objects.get(phone_number=phone)
+            user.set_password(new_password)
             user.save()
 
-            logger.info(f"用户密码重置成功, 手机号: {phone}")
+            logger.info(f"密码重置成功, 手机号: {phone}")
 
             return Response({
                 "code": 200,
                 "message": "密码重置成功"
             })
-
+        except User.DoesNotExist:
+            return Response({
+                "code": 400,
+                "message": "该手机号未注册",
+                "errors": {"phone": ["该手机号未注册"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.exception(f"密码重置过程中发生异常: {str(e)}")
             return Response({
                 "code": 500,
-                "message": "服务器错误，密码重置失败"
+                "message": "服务器错误，密码重置失败",
+                "errors": {"detail": ["服务器内部错误，请稍后重试"]}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _reset_password_with_email(self, request):
+        """邮箱重置密码"""
+        serializer = PasswordResetSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                "code": 400,
+                "message": "重置失败",
+                "errors": serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data.get('email')
+        code = serializer.validated_data['code']
+        new_password = serializer.validated_data['newPassword']
+
+        if not EmailService.verify_code(email, code):
+            logger.warning(f"密码重置验证码验证失败, 邮箱: {email}")
+            return Response({
+                "code": 400,
+                "message": "验证码错误或已过期",
+                "errors": {"code": ["验证码错误或已过期"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+            user.set_password(new_password)
+            user.save()
+
+            logger.info(f"密码重置成功, 邮箱: {email}")
+
+            return Response({
+                "code": 200,
+                "message": "密码重置成功"
+            })
+        except User.DoesNotExist:
+            return Response({
+                "code": 400,
+                "message": "该邮箱未注册",
+                "errors": {"email": ["该邮箱未注册"]}
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.exception(f"密码重置过程中发生异常: {str(e)}")
+            return Response({
+                "code": 500,
+                "message": "服务器错误，密码重置失败",
+                "errors": {"detail": ["服务器内部错误，请稍后重试"]}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class FeatureFlagsAPIView(APIView):
+    """
+    获取功能开关状态API
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        """
+        获取前端需要的功能开关状态
+        """
+        try:
+            # 只返回前端需要的功能开关
+            frontend_flags = {
+                'SMS_SERVICE_ENABLED': FEATURE_FLAGS.get('SMS_SERVICE_ENABLED', False),
+                'EMAIL_SERVICE_ENABLED': FEATURE_FLAGS.get('EMAIL_SERVICE_ENABLED', True),
+                'PASSWORD_LOGIN_ENABLED': True,  # 密码登录始终启用
+            }
+            
+            return Response({
+                'code': 200,
+                'message': '获取功能开关状态成功',
+                'data': frontend_flags
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"获取功能开关状态失败: {str(e)}")
+            return Response({
+                'code': 500,
+                'message': '获取功能开关状态失败'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -8,7 +8,11 @@ logger = logging.getLogger(__name__)
 
 @shared_task
 def cleanup_expired_tokens():
-    """清理已过期的黑名单令牌"""
+    """
+    只要refresh token还没过期，理论上它都可能被恶意使用。
+    如果你提前把黑名单记录删掉，系统就无法判断某个token是否已经被拉黑，会导致被拉黑的token重新变得可用，严重威胁安全。
+    SimpleJWT官方推荐的做法就是只清理过期的黑名单token，保证在整个生命周期内都能拦截被拉黑的token。
+    """
     try:
         with transaction.atomic():
             # 删除所有过期的令牌
