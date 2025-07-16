@@ -113,43 +113,32 @@ CELERY_CONFIG = {
 }
 
 
-# 阿里云配置
 ALIYUN_CONFIG = {
     'access_key_id': env('ALIYUN_ACCESS_KEY_ID', default=None),
     'access_key_secret': env('ALIYUN_ACCESS_KEY_SECRET', default=None),
     'oss_endpoint': env('ALIYUN_OSS_ENDPOINT', default=None),
+    'oss_shared_bucket_name': env('ALIYUN_OSS_SHARED_BUCKET_NAME', default=None),
     'sts_role_oss_arn': env('ALIYUN_STS_ROLE_OSS_ARN', default=None),
     'sts_role_sms_arn': env('ALIYUN_STS_ROLE_SMS_ARN', default=None),
-    'region_id': env('ALIYUN_REGION_ID', default='cn-wuhan-lr'),
     'sms_sign_name': env('ALIYUN_SMS_SIGN', default=None),
     'sms_template_code_register': env('ALIYUN_SMS_TEMPLATE_REGISTER', default=None),
     'sms_template_code_login': env('ALIYUN_SMS_TEMPLATE_LOGIN', default=None),
     'sms_template_code_resetpassword': env('ALIYUN_SMS_TEMPLATE_RESETPASSWORD', default=None),
 }
 
-# 功能开关配置
 FEATURE_FLAGS = {
-    # 短信服务开关 - 设置为False时禁用短信功能
-    'SMS_SERVICE_ENABLED': env('SMS_SERVICE_ENABLED', default=False),
+    'SMS_SERVICE_ENABLED': env('SMS_SERVICE_ENABLED', default=True),
     'EMAIL_SERVICE_ENABLED': env('EMAIL_SERVICE_ENABLED', default=True),
 }
 
-# 邮件配置
 EMAIL_CONFIG = {
     'backend': 'django.core.mail.backends.smtp.EmailBackend',
-    # 阿里云邮件推送SMTP服务器
     'host': env('EMAIL_HOST', default='smtpdm.aliyun.com'),
-    # 阿里云邮件推送SMTP端口，465 是 SSL 加密连接的标准端口
     'port': env('EMAIL_PORT', default=465),
-    # 使用SSL加密连接
     'use_ssl': env('EMAIL_USE_SSL', default=True),
-    # 使用TLS，默认不使用
     'use_tls': env('EMAIL_USE_TLS', default=False),
-    # 阿里云邮件推送发信地址，如 （noreply@your-domain.com）。
     'username': env('EMAIL_HOST_USER', default=None),
-    # 阿里云邮件推送SMTP密码
     'password': env('EMAIL_HOST_PASSWORD', default=None),
-    # 默认发信地址，用于发送邮件时显示的发件人信息
     'default_from_email': env('DEFAULT_FROM_EMAIL', default=None),
 }
 

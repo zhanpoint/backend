@@ -69,14 +69,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
-    # 使用自定义复杂密码验证器，实现密码规则验证
-    {
-        'NAME': 'apps.dream.validators.ComplexPasswordValidator',
-        'OPTIONS': {
-            'min_length': 8,
-            'max_length': 32,
-        }
-    },
 ]
 
 # Internationalization

@@ -1,224 +1,312 @@
 import json
-import logging
 
 from django.db import transaction
-from rest_framework import permissions, status, viewsets
-from rest_framework.exceptions import ValidationError
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from django.db import models
+from rest_framework import permissions, status, viewsets, filters
+from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.dream.serializers.dream_serializers import (
     DreamCreateSerializer,
+    DreamUpdateSerializer,
     DreamSerializer,
+    DreamListSerializer,
+    DreamJournalSerializer,
+    SleepPatternSerializer,
+    DreamCategorySerializer,
+    TagSerializer,
 )
-from apps.dream.tasks.image_tasks import delete_images, upload_images
 
-from ..models import Dream, DreamCategory, DreamImage, Tag
-
-logger = logging.getLogger(__name__)
+from apps.dream.utils.image_manager import ImageLifecycleManager
+from ..models import Dream, DreamCategory, DreamJournal, SleepPattern, Tag
 
 
 class DreamViewSet(viewsets.ModelViewSet):
     """
-    一个用于处理梦境（Dream）资源的视图集。
-
-    提供了对梦境记录的 CRUD（创建、读取、更新、删除）操作，并集成了
-    复杂的业务逻辑，如图片处理、标签管理和分类。
+    梦境记录的完整CRUD视图集 - 支持图片软删除管理
     """
-
-    # === ViewSet Configuration ===
-
-    # 权限和解析器配置
-    # 确保只有已认证的用户才能访问，并支持多种数据格式的请求
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-    # === Core ViewSet Methods ===
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['privacy', 'lucidity_level', 'is_favorite', 'is_recurring']
+    search_fields = ['title', 'content', 'interpretation']
+    ordering_fields = ['dream_date', 'created_at', 'lucidity_level']
+    ordering = ['-dream_date', '-created_at']
 
     def get_queryset(self):
-        """
-        获取当前认证用户的梦境记录。
-
-        为了优化性能，此方法使用了 select_related 和 prefetch_related
-        来减少数据库查询次数。
-        """
+        """获取当前用户的梦境记录"""
         user = self.request.user
-        return (
-            Dream.objects.filter(user=user)
-            .select_related("user")
-            .prefetch_related(
-                "categories", "theme_tags", "character_tags", "location_tags", "images"
-            )
-            .order_by("-created_at")
+        queryset = Dream.objects.filter(user=user).select_related('user').prefetch_related(
+            'categories', 'tags', 'images', 'related_dreams'
         )
+        
+        # 按分类过滤
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(categories__name=category)
+        
+        # 按标签过滤
+        tags = self.request.query_params.get('tags')
+        if tags:
+            tag_list = tags.split(',')
+            queryset = queryset.filter(tags__name__in=tag_list).distinct()
+        
+        # 按日期范围过滤
+        date_from = self.request.query_params.get('date_from')
+        date_to = self.request.query_params.get('date_to')
+        if date_from:
+            queryset = queryset.filter(dream_date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(dream_date__lte=date_to)
+        
+        return queryset
 
     def get_serializer_class(self):
-        """根据请求操作（Action）动态选择合适的序列化器。"""
-        if self.action in ["create", "update", "partial_update"]:
+        """根据操作选择序列化器"""
+        if self.action == 'list':
+            return DreamListSerializer
+        elif self.action in ['create']:
             return DreamCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return DreamUpdateSerializer
         return DreamSerializer
 
-    # === Action Methods ===
-
     def list(self, request, *args, **kwargs):
-        """处理获取梦境列表的请求，并在内容中插入图片。"""
-        queryset = self.get_queryset()
+        """获取梦境列表"""
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # 分页
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            for dream in page:
+                dream.content = self._insert_images_to_content(dream)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        # 不分页的情况
         for dream in queryset:
             dream.content = self._insert_images_to_content(dream)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
-        """处理获取单个梦境详情的请求，并在内容中插入图片。"""
+        """获取单个梦境详情"""
         instance = self.get_object()
-        instance.content = self._insert_images_to_content(instance)
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        """
-        处理创建新梦境的请求。
-
-        此操作是原子的，确保数据一致性。图片上传将作为后台任务处理。
-        """
+        """创建新梦境 - 包含图片生命周期管理"""
+        # 提取表单数据
+        form_data = self._extract_form_data(request)
+        
+        # 设置用户
+        form_data['user'] = request.user
+        
+        # 如果没有设置梦境日期，使用今天
+        if not form_data.get('dream_date'):
+            form_data['dream_date'] = timezone.now().date()
+        
+        # 创建序列化器实例
+        serializer = self.get_serializer(data=form_data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        # 保存梦境
+        dream = serializer.save(user=request.user)
+        
+        # 处理图片生命周期管理
         try:
-            form_data = self._extract_form_data(request)
-
-            dream = Dream.objects.create(
-                title=form_data["title"],
-                content=form_data["content"],
-                user=request.user,
+            image_manager = ImageLifecycleManager(request.user)
+            image_manager.process_dream_image_changes(
+                dream=dream,
+                old_content=None,  # 新创建，没有旧内容
+                new_content=dream.content
             )
-
-            # 处理关联的分类和标签
-            self._process_categories(dream, form_data.get("categories", []))
-            tags_data = form_data.get("tags", {})
-            for tag_type in ["theme", "character", "location"]:
-                tags = tags_data.get(tag_type, [])
-                if tags:
-                    self._process_tags(dream, tags, tag_type)
-
-            # 仅当数据库事务成功提交后，才启动图片上传的后台任务
-            transaction.on_commit(
-                lambda: self._process_image_uploads(dream, request)
-            )
-
-            # 准备并返回响应数据
-            dream.content = self._insert_images_to_content(dream)
-            serializer = DreamSerializer(dream)
-            response_data = serializer.data
-
-            # 如果有新图片上传，添加WebSocket通知信息
-            if request.FILES:
-                response_data["images_status"] = {
-                    "status": "processing",
-                    "websocket_url": f"/ws/dream-images/{dream.id}/",
-                    "images": [],
-                }
-
-            return Response(response_data, status=status.HTTP_201_CREATED)
-
         except Exception as e:
-            logger.error(f"创建梦境记录失败: {e}")
-            return Response(
-                {"detail": f"创建梦境记录失败: {e}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            # 如果图片处理失败，记录错误但不影响梦境创建
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"梦境创建后图片处理失败: {e}")
+        
+        return Response(DreamSerializer(dream).data, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
-        """
-        处理更新现有梦境的请求。
-
-        此操作是原子的。它会处理基本信息、分类、标签和图片的变更。
-        """
+        """更新梦境 - 支持图片软删除"""
+        instance = self.get_object()
+        partial = kwargs.pop('partial', False)
+        
+        # 保存旧的内容用于图片差异比较
+        old_content = instance.content
+        
+        # 提取表单数据
+        form_data = self._extract_form_data(request)
+        
+        # 创建序列化器并验证
+        serializer = self.get_serializer(instance, data=form_data, partial=partial, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        
+        # 保存更新
+        dream = serializer.save()
+        
+        # 处理图片生命周期管理
         try:
-            instance = self.get_object()
-            form_data = self._extract_form_data(request)
-
-            # 更新基本信息
-            instance.title = form_data.get("title", instance.title)
-            instance.content = form_data.get("content", instance.content)
-            instance.save()
-
-            # 更新分类
-            instance.categories.clear()
-            self._process_categories(instance, form_data.get("categories", []))
-
-            # 更新标签
-            tags_data = form_data.get("tags", {})
-            for tag_type in ["theme", "character", "location"]:
-                current_tags = list(getattr(instance, f"{tag_type}_tags").all())
-                getattr(instance, f"{tag_type}_tags").clear()
-                self._process_tags(instance, tags_data.get(tag_type, []), tag_type)
-                self._cleanup_unused_tags(current_tags)
-
-            # 处理图片（删除旧图片，添加新图片）
-            self._process_image_changes(instance, form_data, request)
-
-            # 准备并返回响应数据
-            instance.content = self._insert_images_to_content(instance)
-            serializer = DreamSerializer(instance)
-            response_data = serializer.data
-
-            # 如果有新图片上传，添加WebSocket通知信息
-            if request.FILES:
-                response_data["images_status"] = {
-                    "status": "processing",
-                    "websocket_url": f"/ws/dream-images/{instance.id}/",
-                    "message": "正在处理新上传的图片，稍后将自动更新",
-                    "images": [],
-                }
-
-            return Response(response_data)
-
-        except Exception as e:
-            logger.error(f"更新梦境记录失败: {e}")
-            return Response(
-                {"detail": f"更新梦境记录失败: {e}"},
-                status=status.HTTP_400_BAD_REQUEST,
+            image_manager = ImageLifecycleManager(request.user)
+            image_manager.process_dream_image_changes(
+                dream=dream,
+                old_content=old_content,
+                new_content=dream.content
             )
+        except Exception as e:
+            # 如果图片处理失败，记录错误但不影响梦境更新
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"梦境更新后图片处理失败: {e}")
+        
+        return Response(DreamSerializer(dream).data)
 
     def destroy(self, request, *args, **kwargs):
-        """
-        处理删除梦境的请求。
-
-        在删除梦境记录前，会先启动一个后台任务来删除关联的云存储（OSS）图片。
-        """
+        """删除梦境 - 标记关联图片为待删除"""
+        instance = self.get_object()
+        
         try:
-            instance = self.get_object()
-            image_queryset = DreamImage.objects.filter(dream=instance)
+            # 在删除梦境前，处理关联的图片
+            image_manager = ImageLifecycleManager(request.user)
             
-            if image_queryset.exists():
-                image_details = [
-                    {"id": image.id, "url": image.image_url} for image in image_queryset
-                ]
-                delete_images(instance.id, image_details, request.user.username)
-                logger.info(f"已将{len(image_details)}个图片发送到删除队列")
-
-            return super().destroy(request, *args, **kwargs)
-
+            # 提取梦境中的所有图片URL
+            image_urls = image_manager.extract_image_urls_from_html(instance.content)
+            
+            # 标记所有相关图片为待删除
+            for url in image_urls:
+                image_manager._mark_image_for_deletion(url)
+            
         except Exception as e:
-            logger.error(f"删除梦境记录失败: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"删除梦境时图片处理失败: {e}")
+        
+        # 删除梦境实例
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'])
+    def toggle_favorite(self, request, pk=None):
+        """切换梦境收藏状态"""
+        dream = self.get_object()
+        dream.is_favorite = not dream.is_favorite
+        dream.save(update_fields=['is_favorite'])
+        
+        serializer = self.get_serializer(dream)
+        return Response(serializer.data)
+
+    @action(detail=False)
+    def favorites(self, request):
+        """获取收藏的梦境列表"""
+        queryset = self.get_queryset().filter(is_favorite=True)
+        page = self.paginate_queryset(queryset)
+        
+        if page is not None:
+            serializer = DreamListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = DreamListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False)
+    def recurring(self, request):
+        """获取重复梦境列表"""
+        queryset = self.get_queryset().filter(is_recurring=True)
+        page = self.paginate_queryset(queryset)
+        
+        if page is not None:
+            serializer = DreamListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = DreamListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False)
+    def statistics(self, request):
+        """获取梦境统计信息"""
+        queryset = self.get_queryset()
+        total_dreams = queryset.count()
+        lucid_dreams = queryset.filter(lucidity_level__gte=3).count()
+        favorite_dreams = queryset.filter(is_favorite=True).count()
+        recurring_dreams = queryset.filter(is_recurring=True).count()
+        
+        return Response({
+            'total_dreams': total_dreams,
+            'lucid_dreams': lucid_dreams,
+            'favorite_dreams': favorite_dreams,
+            'recurring_dreams': recurring_dreams,
+        })
+
+    @action(detail=False)
+    def categories(self, request):
+        """获取可用的梦境分类"""
+        categories = DreamCategory.objects.all()
+        serializer = DreamCategorySerializer(categories, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False)
+    def tags(self, request):
+        """获取用户的标签"""
+        user = request.user
+        tags = Tag.objects.filter(
+            models.Q(created_by=user) | models.Q(is_public=True)
+        ).distinct()
+        serializer = TagSerializer(tags, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def image_stats(self, request):
+        """获取用户的图片统计信息"""
+        try:
+            from ..models import UploadedImage
+            
+            total_images = UploadedImage.objects.filter(user=request.user).count()
+            active_images = UploadedImage.objects.filter(user=request.user, status='active').count()
+            pending_delete = UploadedImage.objects.filter(user=request.user, status='pending_delete').count()
+            
+            return Response({
+                'total_images': total_images,
+                'active_images': active_images,
+                'pending_delete_images': pending_delete,
+            })
+            
+        except Exception as e:
             return Response(
-                {"error": f"删除梦境记录失败: {e}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {'error': f'获取图片统计失败: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    # === Private Methods ===
-
-    # --- Data Handling ---
-
+    # 私有方法
     def _extract_form_data(self, request):
-        """从请求中安全地提取并解析表单数据。"""
+        """从请求中提取表单数据"""
         form_data = {}
-        text_fields = ["title", "content"]
-        json_fields = ["categories", "tags", "remoteImages"]
-
+        
+        # 文本字段
+        text_fields = [
+            'title', 'content', 'interpretation', 'personal_notes',
+            'dream_date', 'lucidity_level', 'mood_before_sleep', 
+            'mood_in_dream', 'mood_after_waking', 'sleep_quality',
+            'sleep_duration', 'bedtime', 'wake_time', 'is_recurring',
+            'recurring_elements', 'vividness',
+            'privacy', 'is_favorite'
+        ]
+        
         for field in text_fields:
-            form_data[field] = request.data.get(field, "")
-
+            value = request.data.get(field)
+            if value is not None and value != '':
+                form_data[field] = value
+        
+        # JSON字段
+        json_fields = ['categories', 'tags', 'related_dream_ids']
         for field in json_fields:
             json_string = request.data.get(field)
             if json_string:
@@ -229,127 +317,35 @@ class DreamViewSet(viewsets.ModelViewSet):
                         else json_string
                     )
                 except json.JSONDecodeError:
-                    logger.error(f"解析JSON字段 '{field}' 失败: {json_string}")
-                    form_data[field] = [] if field != "tags" else {}
+                    form_data[field] = [] if field != 'tags' else {}
+        
         return form_data
 
     def _insert_images_to_content(self, dream):
-        """将梦境关联的图片URL按位置插入到其内容中，生成最终的Markdown文本。"""
-        content = dream.content
-        offset = 0
-        # 按位置升序排列图片
-        for image_obj in dream.images.all().order_by("position"):
-            position = image_obj.position + offset
-            markdown_image = f"![图片]({image_obj.image_url})"
-            content = content[:position] + markdown_image + content[position:]
-            offset += len(markdown_image)
-        return content
+        """插入图片到内容中"""
+        return dream.content
 
-    # --- Category & Tag Processing ---
 
-    def _process_categories(self, dream, category_names):
-        """处理并关联梦境的分类。"""
-        for name in category_names:
-            try:
-                category = DreamCategory.objects.get(name=name)
-                dream.categories.add(category)
-            except DreamCategory.DoesNotExist:
-                raise ValidationError(f"分类 '{name}' 不存在")
+class DreamJournalViewSet(viewsets.ModelViewSet):
+    """梦境日记本视图集"""
+    serializer_class = DreamJournalSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return DreamJournal.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
-    def _process_tags(self, dream, tag_names, tag_type):
-        """处理并关联梦境的标签（主题、角色、地点）。"""
-        tag_field_map = {
-            "theme": dream.theme_tags,
-            "character": dream.character_tags,
-            "location": dream.location_tags,
-        }
-        for name in tag_names:
-            tag, _ = Tag.objects.get_or_create(name=name, tag_type=tag_type)
-            tag_field_map[tag_type].add(tag)
 
-    def _cleanup_unused_tags(self, tags_to_check):
-        """
-        清理不再被任何梦境引用的标签，以保持数据整洁。
-
-        Args:
-            tags_to_check (list[Tag]): 一个包含待检查标签对象的列表。
-        """
-        related_field_map = {
-            "theme": "dream_themes",
-            "character": "dream_characters",
-            "location": "dream_locations",
-        }
-        for tag in tags_to_check:
-            related_field_name = related_field_map.get(tag.tag_type)
-            if related_field_name and getattr(tag, related_field_name).count() == 0:
-                logger.info(f"删除未使用的标签: {tag.name} (类型: {tag.tag_type})")
-                tag.delete()
-
-    # --- Image Processing ---
-
-    def _process_image_changes(self, dream, form_data, request):
-        """
-        处理梦境更新时的图片变更。
-
-        - 删除处理：识别并删除不再使用的图片记录，并异步删除云存储文件。
-        - 上传处理：触发新上传图片的异步处理任务。
-        """
-        try:
-            # 1. 删除不再使用的图片
-            new_image_urls = {img["url"] for img in form_data.get("remoteImages", [])}
-            
-            images_to_delete = dream.images.exclude(image_url__in=new_image_urls)
-            
-            if images_to_delete.exists():
-                image_details = [
-                    {"id": image.id, "url": image.image_url}
-                    for image in images_to_delete
-                ]
-                
-                # 异步删除云存储（OSS）中的文件
-                transaction.on_commit(
-                    lambda: delete_images(dream.id, image_details, request.user.username)
-                )
-
-                # 立即从数据库中删除记录
-                count, _ = images_to_delete.delete()
-                logger.info(f"已删除 {count} 条不再使用的图片数据库记录")
-
-            # 2. 异步处理新上传的图片
-            if request.FILES:
-                transaction.on_commit(
-                    lambda: self._process_image_uploads(dream, request)
-                )
-
-        except Exception as e:
-            logger.error(f"处理图片变更失败: {e}")
-            raise ValidationError(f"处理图片变更失败: {e}")
-
-    def _process_image_uploads(self, dream, request):
-        """
-        准备并触发一个后台任务来处理新上传的图片。
-        """
-        try:
-            image_files, positions = [], []
-            
-            # 从请求中收集图片文件和元数据
-            for key in request.FILES:
-                if key.startswith("imageFile_"):
-                    index = key.split("_")[1]
-                    file = request.FILES[key]
-                    
-                    # 解析元数据以获取图片位置
-                    metadata_str = request.data.get(f"imageMetadata_{index}", "{}")
-                    metadata = json.loads(metadata_str) if isinstance(metadata_str, str) else metadata_str
-                    
-                    image_files.append({"name": file.name, "data": file.read()})
-                    positions.append(metadata.get("position", 0))
-
-            # 如果有图片，则发送到后台任务队列
-            if image_files:
-                upload_images(dream.id, image_files, positions)
-                logger.info(f"已将 {len(image_files)} 个新图片发送到处理队列")
-
-        except Exception as e:
-            logger.error(f"图片上传任务准备失败: {e}")
-            raise ValidationError(f"图片上传任务准备失败: {e}")
+class SleepPatternViewSet(viewsets.ModelViewSet):
+    """睡眠模式视图集"""
+    serializer_class = SleepPatternSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-date']
+    
+    def get_queryset(self):
+        return SleepPattern.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
