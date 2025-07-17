@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
     'channels',  # 使Django识别WebSocket功能
+    'django_celery_beat',  # 用于管理Celery Beat定时任务
     
     # 本地应用
     'apps.dream',
@@ -130,31 +131,3 @@ CELERY_TASK_RESULT_EXPIRES = 3600  # 1小时
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-
-# -- Celery 路由配置 --
-# 1. 定义一个所有任务通用的交换机
-task_exchange = Exchange('tasks', type='direct')
-
-# 2. 定义队列，并明确地将它们全部绑定到上面定义的同一个交换机
-CELERY_TASK_QUEUES = (
-    Queue('default', task_exchange, routing_key='task.default'),
-    Queue('image_tasks', task_exchange, routing_key='task.image'),
-)
-
-# 3. 设置默认队列、交换机和路由键
-CELERY_TASK_DEFAULT_QUEUE = 'default'
-CELERY_TASK_DEFAULT_EXCHANGE = 'tasks'
-CELERY_TASK_DEFAULT_ROUTING_KEY = 'task.default'
-
-# 4. 定义精确的任务路由规则，将特定任务发送到指定队列
-CELERY_TASK_ROUTES = {
-    'apps.dream.tasks.image_tasks.celery_upload_images': {
-        'queue': 'image_tasks',
-        'routing_key': 'task.image',
-    },
-    'apps.dream.tasks.image_tasks.celery_delete_images': {
-        'queue': 'image_tasks',
-        'routing_key': 'task.image',
-    },
-    # 其他未明确指定的任务 (如 token_tasks) 将使用默认路由进入 'default' 队列
-}

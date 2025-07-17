@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.conf import settings
 from typing import Dict
 
-from ..utils.image_manager import GlobalImageCleanupManager, ImageLifecycleManager
+from ..utils.image_manager import GlobalImageCleanupManager
 from ..models import UploadedImage
 
 logger = logging.getLogger(__name__)
@@ -27,16 +27,4 @@ def cleanup_expired_images(self, hours_threshold: int = 24) -> Dict[str, int]:
         
     except Exception as e:
         logger.error(f"[Task {task_id}] 图片清理失败: {e}")
-        raise self.retry(exc=e, countdown=60)
-
-
-@shared_task
-def schedule_daily_cleanup():
-    """每日定时清理任务的调度器"""
-    # 获取配置的清理阈值，默认24小时
-    hours_threshold = getattr(settings, 'IMAGE_DELETE_THRESHOLD_HOURS', 24)
-    
-    # 调用主要的清理任务
-    cleanup_expired_images.delay(hours_threshold=hours_threshold)
-    
-    logger.info(f"已调度每日图片清理任务，阈值: {hours_threshold}小时") 
+        raise self.retry(exc=e, countdown=60) 

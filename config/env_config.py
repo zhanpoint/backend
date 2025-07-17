@@ -91,7 +91,7 @@ CELERY_CONFIG = {
     # 使用 Redis (db 1) 作为结果后端，用于存储任务的执行状态和返回值。
     'result_backend': f"redis://:{REDIS_CONFIG['password']}@{REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}/1",
     # 这个配置项明确指定了Celery worker需要加载的任务模块，这是一种良好的实践，可以避免autodiscover_tasks可能带来的不确定性。
-    'include': ['apps.dream.tasks.image_tasks', 'apps.dream.tasks.token_tasks', 'apps.dream.tasks.email_tasks'],
+    'include': ['apps.dream.tasks.image_cleanup_tasks', 'apps.dream.tasks.token_tasks', 'apps.dream.tasks.email_tasks'],
     'redis_max_connections': 10,
     # 确保了任务和结果都使用JSON格式进行序列化，具有良好的通用性和可读性。
     'task_serializer': 'json',
@@ -127,8 +127,8 @@ ALIYUN_CONFIG = {
 }
 
 FEATURE_FLAGS = {
-    'SMS_SERVICE_ENABLED': env('SMS_SERVICE_ENABLED', default=True),
-    'EMAIL_SERVICE_ENABLED': env('EMAIL_SERVICE_ENABLED', default=True),
+    'SMS_SERVICE_ENABLED': env('SMS_SERVICE_ENABLED'),
+    'EMAIL_SERVICE_ENABLED': env('EMAIL_SERVICE_ENABLED'),
 }
 
 EMAIL_CONFIG = {

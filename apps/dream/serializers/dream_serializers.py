@@ -71,7 +71,7 @@ class DreamSerializer(serializers.ModelSerializer):
             'is_recurring', 'recurring_elements', 'vividness',
             
             # 关联关系
-            'categories', 'tags', 'images', 'related_dreams',
+            'categories', 'tags', 'related_dreams',
             
             # 隐私和分享
             'privacy', 'privacy_display', 'is_favorite',
@@ -115,12 +115,7 @@ class DreamCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_empty=True
     )
-    images = serializers.ListField(
-        child=serializers.DictField(),
-        write_only=True,
-        required=False,
-        allow_empty=True
-    )
+
     related_dream_ids = serializers.ListField(
         child=serializers.UUIDField(),
         write_only=True,
@@ -147,7 +142,7 @@ class DreamCreateSerializer(serializers.ModelSerializer):
             'privacy', 'is_favorite',
             
             # 关联数据（写入）
-            'categories', 'tags', 'images', 'related_dream_ids'
+            'categories', 'tags', 'related_dream_ids'
         ]
     
     def validate_dream_date(self, value):
@@ -160,7 +155,7 @@ class DreamCreateSerializer(serializers.ModelSerializer):
         # 提取关联数据
         categories_data = validated_data.pop('categories', [])
         tags_data = validated_data.pop('tags', [])
-        images_data = validated_data.pop('images', [])
+
         related_dream_ids = validated_data.pop('related_dream_ids', [])
         
         # 创建梦境实例
@@ -278,13 +273,19 @@ class DreamListSerializer(serializers.ModelSerializer):
         }
     
     def get_preview_image(self, obj):
-        first_image = obj.images.first()
-        if first_image:
-            return {
-                'id': first_image.id,
-                'url': first_image.image_url,
-                'title': first_image.title
-            }
+        # 从HTML内容中提取第一张图片
+        if obj.content:
+            from bs4 import BeautifulSoup
+            try:
+                soup = BeautifulSoup(obj.content, 'html.parser')
+                first_img = soup.find('img')
+                if first_img and first_img.get('src'):
+                    return {
+                        'url': first_img.get('src'),
+                        'alt': first_img.get('alt', '')
+                    }
+            except:
+                pass
         return None
 
 

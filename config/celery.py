@@ -21,8 +21,9 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     # 每日凌晨2点清理过期图片
     'daily-image-cleanup': {
-        'task': 'apps.dream.tasks.image_cleanup_tasks.schedule_daily_cleanup',
+        'task': 'apps.dream.tasks.image_cleanup_tasks.cleanup_expired_images',
         'schedule': crontab(hour=2, minute=0),  # 每天凌晨2点执行
+        'args': (24,), # 清理24小时前标记的图片
         'options': {
             'expires': 3600,  # 任务1小时后过期
         }

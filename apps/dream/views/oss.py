@@ -107,6 +107,11 @@ def delete_file(request):
                         {'message': '文件删除成功（仅OSS）'}, 
                         status=status.HTTP_200_OK
                     )
+                
+                return Response(
+                    {'error': '文件不存在或无权限'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
             
             return Response(
                 {'error': '文件不存在或无权限'}, 

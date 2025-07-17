@@ -41,7 +41,7 @@ class DreamViewSet(viewsets.ModelViewSet):
         """获取当前用户的梦境记录"""
         user = self.request.user
         queryset = Dream.objects.filter(user=user).select_related('user').prefetch_related(
-            'categories', 'tags', 'images', 'related_dreams'
+            'categories', 'tags', 'related_dreams'
         )
         
         # 按分类过滤
@@ -150,10 +150,10 @@ class DreamViewSet(viewsets.ModelViewSet):
         # 创建序列化器并验证
         serializer = self.get_serializer(instance, data=form_data, partial=partial, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        
+
         # 保存更新
         dream = serializer.save()
-        
+
         # 处理图片生命周期管理
         try:
             image_manager = ImageLifecycleManager(request.user)
