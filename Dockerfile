@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # 复制依赖文件并安装
-COPY requirements.txt .
+COPY requirements_deploy.txt .
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements_deploy.txt
 
 # 复制项目所有文件到工作目录

@@ -3,7 +3,9 @@ from celery import Celery
 from celery.schedules import crontab
 
 # 在命令中设置环境变量（pycharm中配置的环境变量只在pycharm中生效）
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+app_env = os.environ.get('APP_ENV', 'dev')
+settings_module = f'config.settings.{app_env}'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', settings_module)
 
 # 注释掉这里的django.setup()，因为在Django启动时会造成循环导入
 # django.setup() 应该只在独立脚本中调用，而不是在Django项目的模块中

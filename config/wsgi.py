@@ -11,7 +11,9 @@ import os
 from django.core.wsgi import get_wsgi_application
 
 # 设置Django的环境变量，指定设置模块
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
+app_env = os.environ.get('APP_ENV', 'dev')
+settings_module = f'config.settings.{app_env}'
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', settings_module)
 
 # 获取Django的WSGI应用程序
 application = get_wsgi_application()

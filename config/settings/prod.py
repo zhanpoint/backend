@@ -19,8 +19,8 @@ ALLOWED_HOSTS = ALLOWED_HOSTS
 
 # 生产环境CORS配置 - 根据实际部署域名修改
 CORS_ALLOWED_ORIGINS = [
-    "https://yourdomain.com",
-    "https://www.yourdomain.com",
+    "https://dreamlog.xyz",
+    "https://www.dreamlog.xyz",
 ]
 
 # 允许携带认证信息（cookies等）
