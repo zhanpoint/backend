@@ -97,7 +97,7 @@ EMAIL_HOST_PASSWORD = EMAIL_CONFIG['password']
 DEFAULT_FROM_EMAIL = EMAIL_CONFIG['default_from_email'] or EMAIL_HOST_USER
 
 # 生产环境安全设置
-SECURE_SSL_REDIRECT = True
+# SECURE_SSL_REDIRECT = True  # 该设置会导致 Django 将所有 HTTP 请求重定向到 HTTPS。但是在 Docker 容器内部，Nginx 和 Django 之间的通信是 HTTP 的，这导致了重定向循环。
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_BROWSER_XSS_FILTER = True
@@ -118,8 +118,8 @@ LOGGING = {
             'level': 'INFO',
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
-            'maxBytes': 1024 * 1024 * 15,  # 15MB
-            'backupCount': 10,
+            'maxBytes': 1024 * 1024 * 10,  # 10MB
+            'backupCount': 5,
             'formatter': 'verbose',
         },
         'console': {
