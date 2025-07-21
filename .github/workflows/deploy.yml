@@ -40,10 +40,10 @@ jobs:
             echo "=> 使用 Docker Compose 智能更新服务 (由后端触发)..."
             # Docker Compose 会检测到 backend 目录内容已更改，并仅重建和重启后端服务
             # --remove-orphans 会清理掉不再使用的旧服务容器。
-            sudo docker-compose up --build -d --remove-orphans
+            sudo docker compose up --build -d --remove-orphans
 
             echo "=> 部署命令执行完毕，检查容器状态..."
-            sudo docker-compose ps
+            sudo docker compose ps
             
             echo "=> 清理无用的 Docker 镜像以释放磁盘空间..."
             sudo docker image prune -f
