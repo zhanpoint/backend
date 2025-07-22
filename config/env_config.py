@@ -26,7 +26,10 @@ env = environ.Env(
 
 # 读取项目最外层的.env文件
 # 获取当前文件的路径，向上一级到达backend根目录
-project_root = Path(__file__).resolve().parent.parent
+if env('DEBUG'):
+    project_root = Path(__file__).resolve().parent.parent
+else:
+    project_root = Path(__file__).resolve().parent.parent.parent
 env_path = project_root / '.env'
 
 # # 加载.env文件
